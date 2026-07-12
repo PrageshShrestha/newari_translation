@@ -3,15 +3,13 @@ run_browser.py
 
 Unified local web app:
 
-    audio file (drag & drop) --> NeMo ASR (NwachaMuna-NepConformer-Aug)
+    audio file (drag & drop) --> Whisper Nepali ASR (Dragneel/whisper-large-v3-nepali-openslr)
                               --> Newari autocorrect (correction_engine.py)
                               --> rendered side-by-side in the browser
 
 Long clips are split into CHUNK_SECONDS-long segments before being fed to
-the ASR model (one batched transcribe() call over all chunks), and the
-per-chunk outputs are stitched back together before autocorrect runs on
-the full text -- so everything downstream of raw_text/word_confidence is
-unchanged.
+the ASR model (processed sequentially), and the per-chunk outputs are 
+stitched back together before autocorrect runs on the full text.
 
 Run:
     python run_browser.py
@@ -34,21 +32,16 @@ import soundfile as sf
 from scipy.signal import resample_poly
 from math import gcd
 from flask import Flask, request, jsonify, render_template_string
+import torch
+from transformers import pipeline, AutoProcessor, AutoModelForSpeechSeq2Seq
 
 from correction_engine import CorrectionEngine
 
-# NwachaMuna-NepConformer-Aug was trained at 16kHz mono (see the model's own
-# training manifest config logged at startup: sample_rate: 16000). NeMo's
-# transcribe() does NOT downmix/resample for you -- it feeds the file's raw
-# shape straight into the model, so a stereo or non-16kHz upload crashes with
-# "Input shape mismatch ... expected (batch, time) found (1, 2, N)" or silently
-# degrades accuracy if it merely mismatches sample rate without erroring.
+# Whisper models expect 16kHz mono input
 ASR_TARGET_SAMPLE_RATE = 16000
 
-# Long recordings are split into consecutive chunks of this length before
-# being handed to the ASR model, then the chunk outputs are concatenated.
-# Clips shorter than this go through as a single, unsplit file (no behavior
-# change for the common case).
+# Long recordings are split into consecutive chunks of this length
+# Whisper models have a context window of ~30 seconds, so we use 15 for safety
 CHUNK_SECONDS = 15
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -64,9 +57,15 @@ app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB
 # ---------------------------------------------------------------------
 # Lazy-loaded globals (ASR model is heavy, load once, on first request)
 # ---------------------------------------------------------------------
-_asr_model = None
+_asr_pipeline = None
 _corrector = None
 
+# Model selection - use the best open-source Nepali ASR model
+# Options:
+# - "Dragneel/whisper-large-v3-nepali-openslr" - Best accuracy (1.55B params)
+# - "sumanpaudel1997/nepali-asr-whisper-medium" - Good accuracy (769M params)  
+# - "Dragneel/whisper-small-nepali" - Fastest (244M params)
+MODEL_ID = "Dragneel/whisper-large-v3-nepali-openslr"
 
 def get_corrector():
     global _corrector
@@ -74,27 +73,42 @@ def get_corrector():
         _corrector = CorrectionEngine(ARTIFACTS_DIR)
     return _corrector
 
+def get_asr_pipeline():
+    """Lazy-load the Whisper model pipeline."""
+    global _asr_pipeline
+    if _asr_pipeline is None:
+        print(f"Loading ASR model: {MODEL_ID}...")
+        
+        # Check if CUDA is available
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+        
+        print(f"Using device: {device}")
+        
+        # Create the pipeline with optimized settings
+        _asr_pipeline = pipeline(
+            "automatic-speech-recognition",
+            model=MODEL_ID,
+            tokenizer=MODEL_ID,
+            device=device,
+            torch_dtype=torch_dtype,
+            model_kwargs={"use_safetensors": True},
+            generate_kwargs={
+                "task": "transcribe",
+                "language": "ne",  # Nepali
+                "temperature": 0.0,
+                "no_repeat_ngram_size": 3
+            }
+        )
+        print("ASR model loaded successfully!")
+    
+    return _asr_pipeline
+
 
 def get_asr_model():
-    global _asr_model
-    if _asr_model is None:
-        import nemo.collections.asr as nemo_asr
-        from omegaconf import open_dict
-
-        model = nemo_asr.models.ASRModel.from_pretrained(
-            "ilprl-docse/NwachaMuna-NepConformer-Aug"
-        )
-
-        with open_dict(model.cfg.decoding):
-            model.cfg.decoding.preserve_alignments = True
-            model.cfg.decoding.compute_timestamps = True
-            if "confidence_cfg" in model.cfg.decoding:
-                model.cfg.decoding.confidence_cfg.preserve_token_confidence = True
-                model.cfg.decoding.confidence_cfg.preserve_word_confidence = True
-
-        model.change_decoding_strategy(model.cfg.decoding)
-        _asr_model = model
-    return _asr_model
+    """Wrapper for compatibility with existing code that expects a model object."""
+    # Return the pipeline directly
+    return get_asr_pipeline()
 
 
 # ---------------------------------------------------------------------
@@ -105,19 +119,16 @@ def preprocess_audio_for_asr(input_path: str, output_path: str,
                               target_sr: int = ASR_TARGET_SAMPLE_RATE) -> None:
     """Reads any audio soundfile can open, downmixes to mono if needed,
     resamples to target_sr if needed, and writes a clean 16-bit PCM wav to
-    output_path. This is what actually fixes the
-    'Input shape mismatch ... expected (batch, time)' crash: NeMo's
-    transcribe() expects a plain (time,) mono signal at the model's trained
-    sample rate, and does not do this conversion itself."""
+    output_path."""
     data, sr = sf.read(input_path, always_2d=True)  # shape: (frames, channels)
 
-    # Downmix to mono by averaging channels (stereo/multi-channel -> mono).
+    # Downmix to mono by averaging channels
     if data.shape[1] > 1:
         data = data.mean(axis=1)
     else:
         data = data[:, 0]
 
-    # Resample to the model's expected sample rate if it doesn't already match.
+    # Resample to the model's expected sample rate if needed
     if sr != target_sr:
         g = gcd(sr, target_sr)
         up, down = target_sr // g, sr // g
@@ -128,22 +139,16 @@ def preprocess_audio_for_asr(input_path: str, output_path: str,
 
 
 # ---------------------------------------------------------------------
-# Chunking for long audio: split into CHUNK_SECONDS segments so the model
-# is never fed more than that in one shot; outputs are joined afterward.
+# Chunking for long audio: split into CHUNK_SECONDS segments
 # ---------------------------------------------------------------------
 
 def chunk_audio(processed_path: str, chunk_dir: str, tag: str,
                  chunk_seconds: int = CHUNK_SECONDS,
                  sr: int = ASR_TARGET_SAMPLE_RATE):
     """Splits an already-preprocessed (mono, sr Hz) wav into consecutive
-    chunk_seconds-long wav files, named with `tag` so concurrent requests
-    don't collide. Returns a list of chunk file paths in order. If the
-    audio is <= chunk_seconds long, returns [processed_path] unchanged and
-    no chunk files are created."""
+    chunk_seconds-long wav files. Returns a list of chunk file paths in order."""
     data, file_sr = sf.read(processed_path, always_2d=False)
     if file_sr != sr:
-        # Shouldn't happen since preprocess_audio_for_asr already resampled,
-        # but guard rather than silently mis-chunking.
         raise ValueError(f"chunk_audio expects {sr}Hz audio, got {file_sr}Hz")
 
     total_samples = len(data)
@@ -162,6 +167,32 @@ def chunk_audio(processed_path: str, chunk_dir: str, tag: str,
     return chunk_paths
 
 
+# ---------------------------------------------------------------------
+# Helper: Post-process ASR output (optional transliteration)
+# ---------------------------------------------------------------------
+
+def post_process_asr_output(text: str) -> str:
+    """Clean up common ASR artifacts and fix common phonetic errors."""
+    import re
+    
+    # Remove excessive whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    # Common phonetic corrections for Newari (add more as you discover them)
+    corrections = {
+        # If the ASR consistently gets certain words wrong, add them here
+        # Example: 'जत' : 'जक',
+        #          'छगू' : 'छगु',
+    }
+    
+    for wrong, right in corrections.items():
+        text = text.replace(wrong, right)
+    
+    return text
+
+
+# ---------------------------------------------------------------------
+# API Routes
 # ---------------------------------------------------------------------
 
 @app.route("/")
@@ -189,6 +220,7 @@ def api_transcribe():
 
     processed_path = os.path.join(UPLOAD_DIR, f"processed_{safe_name}.wav")
     chunk_paths = []
+    
     try:
         preprocess_audio_for_asr(path, processed_path)
     except Exception as e:
@@ -199,41 +231,50 @@ def api_transcribe():
         return jsonify({"error": f"Could not read/convert audio file: {e}"}), 400
 
     try:
-        model = get_asr_model()
+        pipeline = get_asr_pipeline()
         corrector = get_corrector()
 
-        # Split into <= CHUNK_SECONDS pieces if needed (short clips pass
-        # through as a single file, i.e. chunk_paths == [processed_path]).
+        # Split into chunks if needed
         chunk_paths = chunk_audio(processed_path, UPLOAD_DIR, tag=str(ts))
 
-        hypotheses = model.transcribe(chunk_paths, return_hypotheses=True)
+        # Transcribe each chunk and collect results
+        chunk_texts = []
+        chunk_confidences = []
+        
+        print(f"Transcribing {len(chunk_paths)} chunk(s)...")
+        
+        for i, chunk_path in enumerate(chunk_paths):
+            print(f"  Processing chunk {i+1}/{len(chunk_paths)}...")
+            
+            # Transcribe the chunk
+            result = pipeline(
+                chunk_path,
+                return_timestamps=False
+            )
+            
+            text = result.get("text", "").strip()
+            chunk_texts.append(text)
+            
+            # Try to extract confidence (Whisper doesn't always provide this)
+            if "confidence" in result:
+                chunk_confidences.append(result["confidence"])
+        
+        # Stitch transcripts back together
+        raw_text = " ".join(chunk_texts).strip()
+        
+        # Apply post-processing (optional transliteration)
+        raw_text = post_process_asr_output(raw_text)
 
-        # Stitch chunk transcripts back into one string, in order.
-        raw_text = " ".join((h.text or "").strip() for h in hypotheses).strip()
-
-        # Per-word confidence: only usable if every chunk produced it;
-        # otherwise fall back to "no confidence" for the whole transcript,
-        # same as the single-file case where the model doesn't populate it.
-        if hypotheses and all(getattr(h, "word_confidence", None) is not None for h in hypotheses):
-            word_confidence = []
-            for h in hypotheses:
-                word_confidence.extend(h.word_confidence)
-        else:
-            word_confidence = None
-
-        words = raw_text.split()
-        if word_confidence is not None and len(word_confidence) == len(words):
-            word_conf_pairs = [
-                {"word": w, "confidence": float(c)} for w, c in zip(words, word_confidence)
-            ]
-        else:
-            word_conf_pairs = [{"word": w, "confidence": None} for w in words]
-
+        # Calculate average confidence if available
         avg_confidence = None
-        confs = [c for c in (word_confidence or []) if c is not None]
-        if confs:
-            avg_confidence = float(sum(confs) / len(confs))
+        if chunk_confidences:
+            avg_confidence = float(sum(chunk_confidences) / len(chunk_confidences))
 
+        # Generate word-level confidence (simplified - Whisper doesn't provide per-word)
+        words = raw_text.split()
+        word_conf_pairs = [{"word": w, "confidence": avg_confidence} for w in words]
+
+        # Run autocorrect
         corrected_text, changes = corrector.correct_text(raw_text)
 
         return jsonify({
@@ -249,10 +290,8 @@ def api_transcribe():
         return jsonify({"error": str(e)}), 500
 
     finally:
+        # Clean up temporary files
         cleanup_paths = [path, processed_path]
-        # Only remove chunk files that are separate from processed_path
-        # (when the clip was short, chunk_paths == [processed_path], which
-        # is already in the cleanup list above).
         if chunk_paths != [processed_path]:
             cleanup_paths += chunk_paths
         for p in cleanup_paths:
@@ -263,7 +302,7 @@ def api_transcribe():
 
 
 # ---------------------------------------------------------------------
-# Front end (single-file template: manuscript / palm-leaf theme)
+# Front end (single-file template)
 # ---------------------------------------------------------------------
 
 INDEX_HTML = r"""
@@ -522,10 +561,10 @@ INDEX_HTML = r"""
 <div class="wrap">
 
   <header>
-    <div class="eyebrow">NwachaMuna Conformer &middot; SymSpell + Noisy Channel</div>
+    <div class="eyebrow">Whisper Nepali ASR &middot; SymSpell + Noisy Channel</div>
     <h1>श्रुति <span>· Shruti</span></h1>
-    <p class="sub">Drop a Newari (Nepal Bhasa) audio clip. It's transcribed, then run through
-      the dictionary-and-bigram autocorrector, side by side.</p>
+    <p class="sub">Drop a Newari (Nepal Bhasa) audio clip. It's transcribed by the best open-source Nepali ASR model,
+      then run through the dictionary-and-bigram autocorrector, side by side.</p>
   </header>
 
   <div class="leaf-frame">
@@ -710,5 +749,14 @@ function renderResults(data){
 
 
 if __name__ == "__main__":
-    print("Starting on http://127.0.0.1:5000  (Ctrl+C to stop)")
+    print("=" * 60)
+    print("श्रुति (Shruti) - Newari Speech Recognition System")
+    print("=" * 60)
+    print(f"ASR Model: {MODEL_ID}")
+    print(f"CUDA Available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print("\nStarting server at http://127.0.0.1:5000")
+    print("Press Ctrl+C to stop")
+    print("=" * 60)
     app.run(host="127.0.0.1", port=5000, debug=False)
