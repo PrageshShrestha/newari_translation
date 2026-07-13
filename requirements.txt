@@ -1,9 +1,9 @@
-gradio
+flask
 nemo_toolkit[asr]
 torch
 soundfile
 scipy
 numpy
 sentencepiece
-jiwer
-pandas
+symspellpy
+omegaconf

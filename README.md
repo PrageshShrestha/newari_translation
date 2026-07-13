@@ -1,187 +1,233 @@
-markdown
+<div align="left">
 
-# Shruti - Newari ASR + Autocorrect Application
+# Shruti
 
-Unified local web application that provides speech-to-text transcription and autocorrection for Newari (Nepal Bhasa) audio files.
+### Nepal Bhasa Speech Recognition Platform
 
-## Architecture Overview
+A local speech-to-text and autocorrection pipeline for Nepal Bhasa (Newari), combining a NeMo-based ASR model with a SymSpell-driven noisy-channel correction engine.
 
-The application consists of three main components:
+[![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
+[![Flask](https://img.shields.io/badge/flask-web%20app-black)](https://flask.palletsprojects.com/)
+[![NeMo](https://img.shields.io/badge/ASR-NVIDIA%20NeMo-76B900)](https://github.com/NVIDIA/NeMo)
+[![License](https://img.shields.io/badge/license-unspecified-lightgrey)](#license)
 
-1. **ASR Engine**: NeMo-based Conformer model (NwachaMuna-NepConformer-Aug) for speech recognition
-2. **Correction Engine**: SymSpell + noisy-channel autocorrector with vocabulary and bigram language model
-3. **Web Interface**: Flask-based single-page application with drag-and-drop audio upload
+[Getting Started](#getting-started) ·
+[Architecture](#system-architecture) ·
+[Components](#components) ·
+[Screenshots](#screenshots) ·
+[References](#references)
 
-## Artifacts
+</div>
 
-The correction engine requires three binary files in the `artifacts/` directory:
+---
 
-newari_asr_app/
-artifacts/
-dictionary.bin # Word list with quantized unigram log-probabilities
-symspell_index.bin # Delete-variant lookup index for SymSpell
-bigrams.bin # Word pair frequency counts (word_id_a, word_id_b, count)
-text
+## Table of Contents
 
+- [Getting Started](#getting-started)
+- [System Architecture](#system-architecture)
+- [Components](#components)
+  - [Correction Engine](#correction-engine)
+  - [Audio Processing](#audio-processing)
+  - [Web Interface](#web-interface)
+- [Artifacts](#artifacts)
+- [Project Structure](#project-structure)
+- [Screenshots](#screenshots)
+- [Dependencies](#dependencies)
+- [References](#references)
+- [License](#license)
 
-Optional file for gazetteer support:
+---
 
-gazetteer_everestner.txt # Proper-noun entities from EverestNER
-text
+## Getting Started
 
+> **New to this repo?** Just copy the command in "One-time setup" below into your terminal. It handles everything — cloning, environment, dependencies, and launching the app.
 
-Optional file for confusion-based correction:
+### One-time setup
 
-word_substitution_pairs.csv # Observed ASR substitution patterns from evaluation
-text
-
-
-## Installation
-
-Install required dependencies:
+Run this once on a new machine. It clones the repo, enters the app directory, and runs `start.sh`, which creates the virtual environment, installs dependencies, and launches the app in your browser.
 
 ```bash
-pip install flask nemo_toolkit[asr] omegaconf torch soundfile scipy
+git clone -b deploy https://github.com/PrageshShrestha/newari_translation.git && cd newari_translation/newari_asr_app && chmod +x start.sh && ./start.sh
+```
 
-Running the Application
+If you are not familiar with the terminal: paste the entire line above into your terminal window and press Enter. It will take a few minutes the first time while it downloads dependencies. Once it finishes, your browser will open automatically at `http://127.0.0.1:5000`.
 
-Start the web server:
-bash
+### Every time after that
 
-cd newari_asr_app
-python run_browser.py
+You do not need to repeat the setup. From inside the `newari_asr_app` folder, just run:
 
-Navigate to http://127.0.0.1:5000 in a web browser.
-Usage
+```bash
+./start.sh
+```
 
-    Drag an audio file (.wav, .flac, .mp3, .ogg, .m4a) onto the drop zone or click to select a file
+`start.sh` detects the existing `newari_asr_env` virtual environment and skips reinstalling dependencies unless you explicitly ask it to.
 
-    Click "Transcribe & Correct"
+---
 
-    The application displays:
+## System Architecture
 
-        Raw ASR output (left panel)
+```
+Audio Input (Upload/Mic)
+        │
+        ▼
+Preprocessing (resample to 16kHz mono)
+        │
+        ▼
+Voice Activity Detection (segment speech)
+        │
+        ▼
+ASR Model (NeMo Conformer)
+        │
+        ▼
+Correction Engine (SymSpell + language model)
+        │
+        ▼
+Web UI (Flask) — raw output + corrected output
+```
 
-        Autocorrected text (right panel)
+---
 
-        List of corrections applied
+## Components
 
-        Average confidence score
+### Correction Engine
 
-Correction Engine
+`correction_engine.py` implements a noisy-channel spelling correction pipeline on top of a vocabulary and bigram language model built from artifact files.
 
-The CorrectionEngine class provides text correction functionality:
-python
-
+```python
 from correction_engine import CorrectionEngine
 
-# Initialize with artifacts directory
 engine = CorrectionEngine(artifacts_dir="artifacts")
 
-# Optional: load confusion pairs from evaluation run
+# Optionally include a confusion-pair CSV from an evaluation run
 engine = CorrectionEngine(
     artifacts_dir="artifacts",
     confusion_csv="word_substitution_pairs.csv"
 )
 
-# Correct text
 corrected_text, changes = engine.correct_text("misrecognized text")
+```
 
-Correction Pipeline
+Pipeline stages, as documented in the original project notes:
 
-    Vocabulary Check: Words already in the training vocabulary are preserved unchanged (prevents over-correction)
+1. **Vocabulary check** — words already present in the training vocabulary are left unchanged, to avoid over-correcting valid output.
+2. **SymSpell lookup** — unknown words are matched against a delete-variant index (max edit distance = 2).
+3. **Weighted edit distance** — candidate scoring uses phonetically-aware substitution costs between confusable characters.
+4. **Language model scoring** — candidates are ranked with unigram/bigram probabilities from the training corpus, combined with edit cost via a weighting parameter (`LAMBDA`).
+5. **Confusion-based correction (optional)** — if `word_substitution_pairs.csv` is supplied, observed ASR substitution patterns are applied as a second pass.
 
-    SymSpell Lookup: Unknown words are looked up via delete-variant index
+### Audio Processing
 
-    Weighted Edit Distance: Candidates are scored using phonetically-aware substitution costs
+Handled in `run_browser.py`:
 
-    Language Model Scoring: Unigram and bigram probabilities from training corpus
+- Input audio is resampled to 16kHz mono before being passed to the ASR model.
+- Multi-channel audio is downmixed to mono.
+- Long recordings are segmented using voice activity detection before transcription.
 
-    Confusion-based Correction (optional): Applies observed ASR substitution patterns as a second pass
+### Web Interface
 
-Configuration Parameters
+`run_browser.py` runs a Flask application that serves a single-page interface for:
 
-    MAX_EDIT_DISTANCE = 2: Maximum edit distance for SymSpell lookup
+- Drag-and-drop audio upload
+- Triggering transcription and correction
+- Displaying raw ASR output alongside corrected text
+- Listing the corrections that were applied
 
-    LAMBDA = 3.0: Weight of error cost versus language model score
+---
 
-    CONFUSABLE_GROUPS: Phonetically similar character groups for weighted edit distance
+## Artifacts
 
-    min_count = 10: Minimum frequency threshold for confusion pairs
+The correction engine expects these files inside `artifacts/`:
 
-Audio Processing
-Preprocessing
+| File | Purpose |
+|---|---|
+| `dictionary.bin` | Word list with unigram log-probabilities |
+| `bigrams.bin` | Word-pair frequency counts |
 
-    Audio is resampled to 16kHz mono (ASR model requirement)
+Optional files at the project root:
 
-    Multi-channel audio is downmixed to mono
+| File | Purpose |
+|---|---|
+| `gazetteer_everestner.txt` | Proper-noun list for named-entity aware correction |
+| `word_substitution_pairs.csv` | Observed ASR confusion pairs, used for second-pass correction |
 
-    Supported formats: WAV, FLAC, MP3, OGG, M4A
+---
 
-Segmentation
+## Project Structure
 
-Long audio files are split using Silero VAD (Voice Activity Detection):
-
-    Speech regions are detected and merged if separated by short pauses
-
-    Minimum speech segment length: 0.2 seconds
-
-    Maximum chunk length: 15 seconds (safety cap)
-
-    VAD fallback: fixed-window splitting if VAD unavailable
-
-File Structure
-text
-
+```
 newari_asr_app/
-├── run_browser.py           # Flask web application
-├── correction_engine.py     # Standalone correction engine
-├── artifacts/               # Required binary artifacts
+├── start.sh                    # One-command setup + launch
+├── setup.sh                    # Standalone environment setup
+├── run_browser.py              # Flask web application
+├── correction_engine.py        # Correction engine (usable standalone)
+├── requirements.txt
+├── artifacts/
 │   ├── dictionary.bin
-│   ├── symspell_index.bin
-│   └── bigrams.bin
-├── uploads/                 # Temporary audio storage (auto-cleaned)
+│   ├── bigrams.bin
+│   └── word_substitution_pairs.csv
+├── gazetteer_everestner.txt
+├── word_substitution_pairs.csv
+├── uploads/                     # Temporary audio storage
 └── README.md
+```
 
-Evaluation
+---
 
-For performance evaluation and confusion pair generation, use the companion script:
-bash
+## Screenshots
 
-python evaluate_asr_and_correction.py \
-    --data-dir ./datasets \
-    --artifacts-dir ./newari_asr_app/artifacts \
-    --asr-model "ilprl-docse/NwachaMuna-NepConformer-Aug" \
-    --output-dir ./results \
-    --splits train validation test
+<div align="center">
 
-The evaluation script produces:
+**Main Interface**
 
-    word_substitution_pairs.csv: Observed ASR confusion patterns
+<img src="ss1.jpeg" width="720" alt="Main interface" />
 
-    char_substitution_pairs.csv: Character-level confusion patterns
+**Transcription Results**
 
-    per_utterance_results.csv: Detailed utterance-level metrics
+<img src="ss2.jpeg" width="720" alt="Transcription results" />
 
-    corpus_summary.json: Aggregate WER/CER statistics
+</div>
 
-Dependencies
+---
 
-    Flask (web server)
+## Dependencies
 
-    NeMo Toolkit (ASR model)
+Confirmed from `run_browser.py` and `correction_engine.py`:
 
-    SoundFile (audio I/O)
+- **Flask** — web server
+- **NeMo Toolkit** — ASR model loading and inference
+- **PyTorch** — deep learning backend for the ASR model
+- **SoundFile** — audio I/O
+- **SciPy** — audio resampling
+- **SymSpellPy** — delete-variant edit-distance lookup
+- **OmegaConf** — NeMo model configuration
 
-    SciPy (resampling)
+System dependency:
 
-    PyTorch (deep learning framework)
+- **FFmpeg** — required for decoding browser microphone recordings (webm/Opus). Uploaded WAV/FLAC files work without it.
 
-    Silero VAD (voice activity detection)
+---
 
-License
+## References
 
-This project is for research and development purposes. ASR model weights and training data are subject to their respective licenses.
-Development Notes
+- **NVIDIA NeMo** — toolkit used for the ASR model. https://github.com/NVIDIA/NeMo
+- **SymSpell** — delete-based spelling correction algorithm underlying the correction engine's candidate lookup. https://github.com/wolfgarbe/SymSpell
+- **Flask** — web framework serving the application. https://flask.palletsprojects.com/
+- **PyTorch** — deep learning framework used by NeMo. https://pytorch.org/
+- **SoundFile** — audio file I/O library. https://github.com/bastibe/python-soundfile
+- **SciPy** — used for audio resampling. https://scipy.org/
 
-The correction_engine.py module can be used independently of the web application for batch processing or integration with other services. The engine loads all artifacts once at initialization and maintains them in memory for fast inference.
+If a voice activity detection model, a specific ASR checkpoint, or additional corpora are used in your deployment, add them here with their source links once confirmed — avoid listing anything not directly verifiable from the code.
+
+---
+
+## License
+
+Add your chosen license here (for example, MIT, Apache 2.0). Third-party components above are subject to their own respective licenses — check each project's repository before redistribution.
+
+---
+
+<div align="center">
+
+Built for Nepal Bhasa language documentation and preservation.
+
+</div>
