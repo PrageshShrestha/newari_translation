@@ -542,284 +542,600 @@ INDEX_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Newari speech transcription</title>
+<title>Shruti — Nepal Bhasa Speech Recognition</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Noto+Serif+Devanagari:wght@500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --colour-text: #0b0c0c;
-    --colour-text-secondary: #505a5f;
-    --colour-link: #1d70b8;
-    --colour-link-hover: #003078;
-    --colour-border: #b1b4b6;
-    --colour-border-light: #f3f2f1;
-    --colour-background: #ffffff;
-    --colour-background-alt: #f3f2f1;
-    --colour-focus: #ffdd00;
-    --colour-button: #00703c;
-    --colour-button-hover: #005a30;
-    --colour-error: #d4351c;
-    --colour-highlight: #fff7bf;
-    --font-stack: -apple-system, "Segoe UI", Arial, sans-serif;
-    --max-width: 760px;
+    --brick:        #8B2E1D;
+    --brick-deep:    #6E2216;
+    --copper:       #B5651D;
+    --manuscript:   #F4E7D3;
+    --manuscript-2: #EADBC2;
+    --wood:         #3A2418;
+    --wood-soft:    #5A3A28;
+    --gold:         #D4A017;
+    --gold-soft:    #E4BE55;
+    --ink:          #2A1810;
+    --paper-line:   rgba(58, 36, 24, 0.10);
+    --shadow-warm:  rgba(58, 24, 12, 0.25);
+
+    --font-display: "Fraunces", "Noto Serif Devanagari", serif;
+    --font-body:    "Fraunces", "Noto Serif Devanagari", serif;
+    --font-mono:    "JetBrains Mono", ui-monospace, monospace;
+
+    --max-width: 880px;
   }
 
   * { box-sizing: border-box; }
-
   html { font-size: 16px; }
 
   body {
     margin: 0;
-    font-family: var(--font-stack);
-    color: var(--colour-text);
-    background: var(--colour-background);
-    line-height: 1.5;
-    font-size: 1.1875rem;
+    font-family: var(--font-body);
+    color: var(--ink);
+    line-height: 1.6;
+    font-size: 1.0625rem;
+    background:
+      radial-gradient(1100px 620px at 12% -8%, rgba(212,160,23,0.16), transparent 60%),
+      radial-gradient(900px 560px at 108% 12%, rgba(139,46,29,0.14), transparent 55%),
+      repeating-linear-gradient(135deg, rgba(58,36,24,0.035) 0 2px, transparent 2px 26px),
+      repeating-linear-gradient(45deg, rgba(58,36,24,0.03) 0 2px, transparent 2px 26px),
+      var(--manuscript);
   }
 
-  a { color: var(--colour-link); }
-  a:hover { color: var(--colour-link-hover); }
-  a:focus, button:focus, input:focus, .dropzone:focus {
-    outline: 3px solid var(--colour-focus);
-    outline-offset: 0;
-    box-shadow: inset 0 0 0 2px var(--colour-text);
+  a { color: var(--brick); }
+  a:hover { color: var(--brick-deep); }
+  a:focus-visible, button:focus-visible, input:focus-visible, .dropzone:focus-visible {
+    outline: 3px solid var(--gold);
+    outline-offset: 2px;
   }
 
   .skip-link {
-    position: absolute;
-    left: -9999px;
-    top: 0;
-    background: #fff;
-    padding: 0.5rem 1rem;
-    z-index: 100;
+    position: absolute; left: -9999px; top: 0;
+    background: var(--wood); color: var(--manuscript);
+    padding: 0.6rem 1rem; z-index: 100;
+    font-family: var(--font-mono); font-size: 0.85rem;
   }
   .skip-link:focus { left: 0; }
 
-  header.service-header {
-    background: var(--colour-text);
-    color: #fff;
-    padding: 0.75rem 1.25rem;
+  /* ---------------- Header ---------------- */
+  header.top-bar {
+    background: linear-gradient(180deg, var(--wood) 0%, #2c1a10 100%);
+    color: var(--manuscript);
+    border-bottom: 3px solid var(--gold);
   }
-  header.service-header .inner {
+  header.top-bar .inner {
     max-width: var(--max-width);
     margin: 0 auto;
+    padding: 0.9rem 1.25rem;
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.85rem;
   }
-  header.service-header .logo-mark {
-    flex-shrink: 0;
-    display: block;
-  }
-  header.service-header .org {
+  header.top-bar .wordmark {
+    font-family: var(--font-display);
     font-weight: 700;
-    font-size: 1.125rem;
+    font-size: 1.2rem;
     letter-spacing: 0.02em;
+    color: var(--manuscript);
   }
-  header.service-header .service-name {
-    font-size: 1rem;
-    color: #cfd3d6;
-    text-decoration: none;
-    border-left: 1px solid #6f777b;
-    padding-left: 0.75rem;
+  header.top-bar .tagline-sm {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--gold-soft);
+    letter-spacing: 0.05em;
+    border-left: 1px solid rgba(244,231,211,0.25);
+    padding-left: 0.85rem;
   }
-  /* Waveform logo bars animate gently -- a small, honest bit of life on an
-     otherwise plain page, standing in for "listening" without resorting to
-     a stock AI-sparkle icon. Respects reduced-motion preference below. */
+
+  /* ---------------- Logo mark ----------------
+     Stepped pagoda-roof silhouette above a row of bars that read equally
+     as a waveform and as the vertical struts of a carved Newari jhya
+     (lattice window). Bars breathe gently -- a small sign of "listening"
+     rather than a static icon. */
+  .logo-mark { flex-shrink: 0; display: block; }
+  .logo-mark .roof { fill: var(--gold); }
   .logo-mark .bar {
-    animation: logo-pulse 1.6s ease-in-out infinite;
-    transform-origin: center;
+    fill: var(--copper);
+    animation: logo-breathe 2.2s ease-in-out infinite;
+    transform-origin: center bottom;
   }
-  .logo-mark .bar:nth-child(1) { animation-delay: 0s; }
-  .logo-mark .bar:nth-child(2) { animation-delay: 0.15s; }
-  .logo-mark .bar:nth-child(3) { animation-delay: 0.3s; }
-  .logo-mark .bar:nth-child(4) { animation-delay: 0.15s; }
-  .logo-mark .bar:nth-child(5) { animation-delay: 0s; }
-  @keyframes logo-pulse {
-    0%, 100% { transform: scaleY(0.4); }
-    50% { transform: scaleY(1); }
+  .logo-mark .bar:nth-child(3) { animation-delay: 0s;    fill: var(--gold); }
+  .logo-mark .bar:nth-child(4) { animation-delay: 0.18s; }
+  .logo-mark .bar:nth-child(5) { animation-delay: 0.36s; }
+  .logo-mark .bar:nth-child(6) { animation-delay: 0.18s; }
+  .logo-mark .bar:nth-child(7) { animation-delay: 0s; }
+  @keyframes logo-breathe {
+    0%, 100% { transform: scaleY(0.55); }
+    50%      { transform: scaleY(1); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .logo-mark .bar { animation: none; transform: scaleY(0.75); }
+    .logo-mark .bar { animation: none; transform: scaleY(0.8); }
   }
 
-  main {
+  /* ---------------- Hero ---------------- */
+  .hero {
     max-width: var(--max-width);
     margin: 0 auto;
-    padding: 2rem 1.25rem 4rem;
+    padding: 3.5rem 1.25rem 2.5rem;
+    text-align: center;
   }
-
-  h1 {
-    font-size: 2rem;
-    line-height: 1.2;
-    margin: 0 0 0.75rem;
+  .hero .devanagari {
+    font-family: "Noto Serif Devanagari", serif;
+    font-weight: 700;
+    font-size: clamp(2.4rem, 7vw, 3.6rem);
+    color: var(--brick);
+    margin: 0 0 0.35rem;
+    letter-spacing: 0.01em;
   }
-
-  p.lede {
-    font-size: 1.1875rem;
-    color: var(--colour-text-secondary);
+  .hero h1 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-style: italic;
+    font-size: clamp(1.15rem, 3vw, 1.5rem);
+    color: var(--wood-soft);
+    margin: 0 0 1.1rem;
+    letter-spacing: 0.01em;
+  }
+  .hero p.lede {
     max-width: 42em;
-    margin: 0 0 2rem;
+    margin: 0 auto;
+    color: var(--wood-soft);
+    font-size: 1.05rem;
+  }
+  .hero .rule {
+    width: 72px; height: 3px;
+    margin: 1.6rem auto 0;
+    background: linear-gradient(90deg, var(--copper), var(--gold));
+    border-radius: 2px;
   }
 
+  main { max-width: var(--max-width); margin: 0 auto; padding: 0 1.25rem 4rem; }
+
+  section { margin-bottom: 3rem; }
+
+  h2.section-heading {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.5rem;
+    color: var(--brick);
+    margin: 0 0 1.1rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+  }
+  h2.section-heading .num {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--gold);
+    font-weight: 600;
+  }
+
+  /* ---------------- Panel (carved-frame card) ---------------- */
   .panel {
-    border: 1px solid var(--colour-border);
-    padding: 1.5rem;
-    margin-bottom: 2rem;
+    background: #FBF3E4;
+    border: 1px solid var(--paper-line);
+    border-radius: 10px;
+    padding: 1.75rem;
+    box-shadow: 0 10px 28px -18px var(--shadow-warm), inset 0 0 0 1px rgba(212,160,23,0.15);
+    position: relative;
+  }
+  .panel::before {
+    /* thin gold inlay line, evoking a carved wooden frame */
+    content: "";
+    position: absolute; inset: 6px;
+    border: 1px solid rgba(212,160,23,0.25);
+    border-radius: 6px;
+    pointer-events: none;
   }
 
   label.field-label {
     display: block;
-    font-weight: 700;
-    margin-bottom: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--copper);
+    font-weight: 600;
+    margin-bottom: 0.75rem;
   }
 
   .dropzone {
-    border: 2px dashed var(--colour-border);
-    background: var(--colour-background-alt);
-    padding: 2rem 1rem;
+    border: 2px dashed var(--copper);
+    background: repeating-linear-gradient(45deg, rgba(181,101,29,0.05) 0 10px, transparent 10px 20px);
+    border-radius: 8px;
+    padding: 2.5rem 1rem;
     text-align: center;
     cursor: pointer;
+    transition: border-color .2s ease, background .2s ease;
   }
-  .dropzone.dragover {
-    border-color: var(--colour-link);
-    background: #eef4f8;
+  .dropzone:hover { border-color: var(--gold); }
+  .dropzone.dragover { border-color: var(--gold); background: rgba(212,160,23,0.10); }
+  .dropzone p { margin: 0.3rem 0; }
+  .dropzone .glyph {
+    font-family: "Noto Serif Devanagari", serif;
+    font-size: 1.7rem;
+    color: var(--gold);
+    display: block;
+    margin-bottom: 0.4rem;
   }
-  .dropzone p { margin: 0.25rem 0; }
-  .dropzone .hint { color: var(--colour-text-secondary); font-size: 0.9375rem; }
+  .dropzone .instruction { font-size: 1.05rem; color: var(--wood); }
+  .dropzone .hint { color: var(--wood-soft); font-size: 0.85rem; font-family: var(--font-mono); }
   .dropzone .filename {
-    margin-top: 0.75rem;
-    font-weight: 700;
+    margin-top: 0.85rem;
+    font-weight: 600;
     word-break: break-all;
+    color: var(--brick);
   }
   input[type="file"] {
-    position: absolute;
-    width: 1px; height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
+    position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip: rect(0 0 0 0);
   }
 
   button.primary {
-    font-family: inherit;
-    font-size: 1.1875rem;
-    font-weight: 700;
-    background: var(--colour-button);
-    color: #fff;
-    border: 2px solid transparent;
-    padding: 0.75rem 1.5rem;
+    font-family: var(--font-body);
+    font-size: 1.05rem;
+    font-weight: 600;
+    background: linear-gradient(180deg, var(--brick), var(--brick-deep));
+    color: var(--manuscript);
+    border: none;
+    border-radius: 7px;
+    padding: 0.8rem 1.7rem;
     cursor: pointer;
-    box-shadow: 0 2px 0 #002d18;
+    box-shadow: 0 3px 0 #4a170e, 0 8px 18px -8px var(--shadow-warm);
+    transition: transform .12s ease, box-shadow .12s ease;
   }
-  button.primary:hover { background: var(--colour-button-hover); }
-  button.primary:active { box-shadow: none; transform: translateY(2px); }
+  button.primary:hover:not(:disabled) { transform: translateY(-1px); }
+  button.primary:active:not(:disabled) { box-shadow: 0 1px 0 #4a170e; transform: translateY(2px); }
   button.primary:disabled {
-    background: #b1b4b6;
-    box-shadow: none;
-    cursor: not-allowed;
+    background: #c9bba3; color: #8a7c67;
+    box-shadow: none; cursor: not-allowed;
   }
   button.primary .arrow { margin-left: 0.4rem; }
 
+  /* ---------------- Progress stepper ---------------- */
+  .stepper {
+    display: none;
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px dashed var(--paper-line);
+  }
+  .stepper.active { display: block; }
+  .stepper ol {
+    list-style: none;
+    margin: 0; padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0;
+  }
+  .stepper li {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: #b0a389;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .stepper li:not(:last-child)::after {
+    content: "—";
+    color: #d8cbb0;
+    margin: 0 0.6rem;
+  }
+  .stepper li .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #d8cbb0;
+    flex-shrink: 0;
+  }
+  .stepper li.done { color: var(--wood-soft); }
+  .stepper li.done .dot { background: var(--copper); }
+  .stepper li.current { color: var(--brick); font-weight: 600; }
+  .stepper li.current .dot {
+    background: var(--gold);
+    animation: dot-pulse 1s ease-in-out infinite;
+  }
+  @keyframes dot-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(212,160,23,0.5); }
+    50% { box-shadow: 0 0 0 5px rgba(212,160,23,0); }
+  }
+
   .status {
     margin-top: 1rem;
-    font-weight: 700;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--wood-soft);
   }
-  .status[data-state="error"] { color: var(--colour-error); }
+  .status[data-state="error"] { color: var(--brick); font-weight: 600; }
 
   .error-summary {
-    border: 4px solid var(--colour-error);
-    padding: 1rem 1.5rem;
+    border: 1px solid var(--brick);
+    background: rgba(139,46,29,0.06);
+    border-radius: 8px;
+    padding: 1.1rem 1.4rem;
     margin-bottom: 2rem;
   }
   .error-summary h2 {
-    color: var(--colour-error);
-    font-size: 1.25rem;
-    margin: 0 0 0.5rem;
+    color: var(--brick);
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    margin: 0 0 0.4rem;
   }
+  .error-summary p { margin: 0; color: var(--wood); }
 
-  h2.section-heading {
-    font-size: 1.5rem;
-    border-bottom: 1px solid var(--colour-border);
-    padding-bottom: 0.5rem;
-    margin-top: 0;
-  }
-
-  table.sentence-table {
-    width: 100%;
-    border-collapse: collapse;
+  /* ---------------- Aggregate confidence ---------------- */
+  .confidence-summary {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
     margin-bottom: 1.5rem;
-    font-size: 1rem;
   }
-  table.sentence-table caption {
-    text-align: left;
-    font-weight: 700;
-    margin-bottom: 0.5rem;
+  .confidence-summary .figure {
+    font-family: var(--font-mono);
+    font-size: 2.1rem;
+    font-weight: 600;
+    color: var(--brick);
+    line-height: 1;
   }
-  table.sentence-table th,
-  table.sentence-table td {
-    text-align: left;
-    vertical-align: top;
-    padding: 0.75rem 0.75rem 0.75rem 0;
-    border-bottom: 1px solid var(--colour-border-light);
+  .confidence-summary .figure small {
+    font-size: 1rem; color: var(--wood-soft); font-weight: 500;
   }
-  table.sentence-table th {
-    border-bottom: 2px solid var(--colour-border);
-    font-size: 0.9375rem;
-    color: var(--colour-text-secondary);
-    font-weight: 700;
-  }
-  table.sentence-table td.timestamp {
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-    color: var(--colour-text-secondary);
-    width: 4.5rem;
-  }
-  table.sentence-table td.confidence {
-    white-space: nowrap;
-    width: 4rem;
-  }
-  .changed-word {
-    background: var(--colour-highlight);
-    padding: 0 0.15em;
-  }
-  .conf-low { color: var(--colour-error); font-weight: 700; }
-
-  details.changes-detail {
-    margin-top: 1rem;
-  }
-  details.changes-detail summary {
-    cursor: pointer;
-    font-weight: 700;
-    color: var(--colour-link);
-  }
-  details.changes-detail summary:hover { text-decoration: underline; }
-  ul.change-list {
-    margin: 0.75rem 0 0;
-    padding-left: 1.25rem;
-  }
-  ul.change-list li { margin-bottom: 0.35rem; }
-
-  .visually-hidden {
-    position: absolute;
-    width: 1px; height: 1px;
-    margin: -1px; padding: 0; border: 0;
-    clip: rect(0 0 0 0);
+  .confidence-summary .track {
+    flex: 1;
+    height: 8px;
+    border-radius: 5px;
+    background: var(--manuscript-2);
     overflow: hidden;
   }
+  .confidence-summary .fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--brick), var(--gold));
+    width: 0%;
+    transition: width .7s ease;
+  }
+  .confidence-summary .label {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--wood-soft);
+  }
 
+  /* ---------------- Transcript cards (side-by-side) ---------------- */
+  .transcript-card {
+    border: 1px solid var(--paper-line);
+    border-radius: 9px;
+    background: #FBF3E4;
+    padding: 1.2rem 1.4rem;
+    margin-bottom: 1rem;
+  }
+  .transcript-card .meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--wood-soft);
+  }
+  .transcript-card .timestamp {
+    background: var(--wood);
+    color: var(--gold-soft);
+    padding: 0.15rem 0.55rem;
+    border-radius: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .transcript-card .conf-badge {
+    padding: 0.15rem 0.55rem;
+    border-radius: 4px;
+    background: rgba(181,101,29,0.15);
+    color: var(--copper);
+    font-weight: 600;
+  }
+  .transcript-card .conf-badge.low {
+    background: rgba(139,46,29,0.15);
+    color: var(--brick);
+  }
+  .transcript-card .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+  }
+  @media (max-width: 640px) {
+    .transcript-card .pair { grid-template-columns: 1fr; }
+  }
+  .transcript-card .col .col-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--copper);
+    margin-bottom: 0.4rem;
+  }
+  .transcript-card .col.corrected .col-label { color: var(--brick); }
+  .transcript-card .devanagari-text {
+    font-family: "Noto Serif Devanagari", serif;
+    font-size: 1.25rem;
+    line-height: 1.85;
+    color: var(--ink);
+  }
+  .transcript-card .col:not(.corrected) { border-right: 1px dashed var(--paper-line); padding-right: 1.25rem; }
+  @media (max-width: 640px) {
+    .transcript-card .col:not(.corrected) { border-right: none; padding-right: 0; border-bottom: 1px dashed var(--paper-line); padding-bottom: 0.85rem; margin-bottom: 0.85rem; }
+  }
+  .changed-word {
+    background: rgba(212,160,23,0.28);
+    border-bottom: 2px solid var(--gold);
+    padding: 0 0.1em;
+    border-radius: 2px;
+  }
+
+  details.changes-detail { margin-top: 1.25rem; }
+  details.changes-detail summary {
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--brick);
+  }
+  details.changes-detail summary:hover { color: var(--brick-deep); }
+  ul.change-list {
+    margin: 0.85rem 0 0;
+    padding-left: 0;
+    list-style: none;
+  }
+  ul.change-list li {
+    font-family: "Noto Serif Devanagari", serif;
+    font-size: 1.05rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--paper-line);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  ul.change-list li:last-child { border-bottom: none; }
+  ul.change-list .from { color: var(--wood-soft); text-decoration: line-through; }
+  ul.change-list .arrow { font-family: var(--font-mono); color: var(--gold); font-size: 0.85rem; }
+  ul.change-list .to { color: var(--brick); font-weight: 600; }
+
+  .empty-note {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: var(--wood-soft);
+    font-style: italic;
+  }
+
+  /* ---------------- Methodology ---------------- */
+  .method-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.1rem;
+  }
+  .method-card {
+    border-left: 3px solid var(--copper);
+    padding: 0.2rem 0 0.2rem 1rem;
+  }
+  .method-card .step-num {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--gold);
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+  .method-card h3 {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    margin: 0.25rem 0 0.35rem;
+    color: var(--wood);
+  }
+  .method-card p {
+    margin: 0;
+    font-size: 0.92rem;
+    color: var(--wood-soft);
+  }
+
+  /* ---------------- Credits ---------------- */
+  .credit-groups {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1.5rem;
+  }
+  .credit-groups h3 {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--copper);
+    margin: 0 0 0.7rem;
+  }
+  ul.credit-list { list-style: none; margin: 0; padding: 0; }
+  ul.credit-list li {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--paper-line);
+    font-size: 0.95rem;
+    color: var(--wood);
+  }
+  ul.credit-list li:last-child { border-bottom: none; }
+  ul.credit-list li a { text-decoration: none; }
+  ul.credit-list li a:hover { text-decoration: underline; }
+
+  .repo-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+  .repo-panel code {
+    font-family: var(--font-mono);
+    background: var(--wood);
+    color: var(--gold-soft);
+    padding: 0.55rem 0.9rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+  }
+  a.repo-link {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--brick);
+    text-decoration: none;
+    border: 1px solid var(--brick);
+    padding: 0.55rem 1rem;
+    border-radius: 6px;
+    transition: background .15s ease, color .15s ease;
+  }
+  a.repo-link:hover { background: var(--brick); color: var(--manuscript); }
+
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px;
+    margin: -1px; padding: 0; border: 0;
+    clip: rect(0 0 0 0); overflow: hidden;
+  }
+
+  /* ---------------- Footer ---------------- */
   footer.site-footer {
-    border-top: 1px solid var(--colour-border);
-    padding: 2rem 1.25rem;
-    margin-top: 3rem;
+    background: linear-gradient(180deg, #2c1a10 0%, var(--wood) 100%);
+    color: var(--manuscript-2);
+    border-top: 3px solid var(--gold);
+    margin-top: 4rem;
   }
   footer.site-footer .inner {
     max-width: var(--max-width);
     margin: 0 auto;
-    color: var(--colour-text-secondary);
-    font-size: 0.9375rem;
+    padding: 2.5rem 1.25rem 3rem;
   }
+  footer.site-footer .foot-word {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.3rem;
+    color: var(--gold-soft);
+    margin: 0 0 0.2rem;
+  }
+  footer.site-footer .foot-tagline {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: #cbb994;
+    margin: 0 0 1.5rem;
+  }
+  footer.site-footer p {
+    font-size: 0.88rem;
+    color: #cbb994;
+    max-width: 46em;
+    line-height: 1.7;
+    margin: 0 0 1rem;
+  }
+  footer.site-footer .privacy-note {
+    border-left: 2px solid var(--gold);
+    padding-left: 1rem;
+    margin: 1.5rem 0;
+  }
+  footer.site-footer a { color: var(--gold-soft); }
 
   @media (max-width: 480px) {
-    main { padding: 1.5rem 1rem 3rem; }
-    h1 { font-size: 1.5rem; }
-    .panel { padding: 1rem; }
+    main { padding: 0 1rem 3rem; }
+    .panel { padding: 1.25rem; }
+    .hero { padding: 2.5rem 1rem 2rem; }
   }
 </style>
 </head>
@@ -827,46 +1143,182 @@ INDEX_HTML = r"""
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
-<header class="service-header">
+<header class="top-bar">
   <div class="inner">
-    <span class="org">Newari Speech Tools</span>
-    <span class="service-name">Transcription and autocorrect</span>
+    <svg class="logo-mark" width="40" height="34" viewBox="0 0 40 34" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <!-- stepped pagoda roof -->
+      <path class="roof" d="M20 1 L28 9 H12 Z" />
+      <rect class="roof" x="9" y="9" width="22" height="2.4" rx="1" />
+      <path class="roof" d="M20 6 L24 9 H16 Z" opacity="0.7" />
+      <!-- waveform / jhya lattice bars -->
+      <rect class="bar" x="6"  y="16" width="3" height="14" rx="1.4" />
+      <rect class="bar" x="12" y="13" width="3" height="17" rx="1.4" />
+      <rect class="bar" x="18" y="9"  width="3" height="21" rx="1.4" />
+      <rect class="bar" x="24" y="13" width="3" height="17" rx="1.4" />
+      <rect class="bar" x="30" y="16" width="3" height="14" rx="1.4" />
+    </svg>
+    <span class="wordmark">Shruti</span>
+    <span class="tagline-sm">NEPAL BHASA SPEECH PLATFORM</span>
   </div>
 </header>
 
-<main id="main-content">
-  <h1>Transcribe a Newari audio recording</h1>
+<div class="hero">
+  <div class="devanagari">श्रुति</div>
+  <h1>Speech recognition and language correction for Nepal Bhasa</h1>
   <p class="lede">
-    Upload a recording and this tool will produce a transcript, then apply
-    automatic spelling correction. Accepted formats: WAV, FLAC, MP3, OGG, M4A.
+    Upload a Nepal Bhasa recording and receive a research-grade transcription,
+    automatically corrected against a Newari lexicon and named-entity gazetteer,
+    with word-level confidence scoring. Built for the documentation and
+    preservation of the language, not as a general-purpose demo.
   </p>
+  <div class="rule" aria-hidden="true"></div>
+</div>
 
-  <div class="panel">
-    <label class="field-label" for="audio-input">Audio file</label>
-    <div class="dropzone" id="dropzone" tabindex="0" role="button"
-         aria-describedby="dropzone-hint">
-      <p>Drag and drop a file here, or select a file</p>
-      <p class="hint" id="dropzone-hint">Maximum file size 200MB.</p>
-      <p class="filename" id="filename" aria-live="polite"></p>
+<main id="main-content">
+
+  <section aria-labelledby="upload-heading">
+    <h2 class="section-heading" id="upload-heading"><span class="num">01</span> Upload</h2>
+    <div class="panel">
+      <label class="field-label" for="audio-input">Audio file</label>
+      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-describedby="dropzone-hint">
+        <span class="glyph" aria-hidden="true">ॐ</span>
+        <p class="instruction">Drag and drop a recording here, or click to choose a file</p>
+        <p class="hint" id="dropzone-hint">WAV · FLAC · MP3 · OGG · M4A — up to 200MB</p>
+        <p class="filename" id="filename" aria-live="polite"></p>
+      </div>
+      <input type="file" id="audio-input" accept=".wav,.flac,.mp3,.ogg,.m4a">
+
+      <p style="margin-top:1.5rem;">
+        <button class="primary" id="transcribe-btn" type="button" disabled>
+          Transcribe recording <span class="arrow" aria-hidden="true">&rarr;</span>
+        </button>
+      </p>
+
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+
+      <div class="stepper" id="stepper">
+        <ol>
+          <li id="step-upload"><span class="dot"></span>Uploaded</li>
+          <li id="step-preprocess"><span class="dot"></span>Preprocessing audio</li>
+          <li id="step-asr"><span class="dot"></span>Running speech recognition</li>
+          <li id="step-correct"><span class="dot"></span>Applying Nepal Bhasa correction</li>
+          <li id="step-done"><span class="dot"></span>Complete</li>
+        </ol>
+      </div>
     </div>
-    <input type="file" id="audio-input" accept=".wav,.flac,.mp3,.ogg,.m4a">
-
-    <p style="margin-top:1.5rem;">
-      <button class="primary" id="transcribe-btn" type="button" disabled>
-        Transcribe recording <span class="arrow" aria-hidden="true">&rarr;</span>
-      </button>
-    </p>
-
-    <p class="status" id="status" role="status" aria-live="polite"></p>
-  </div>
+  </section>
 
   <div id="error-container"></div>
-  <div id="results-container"></div>
+
+  <section aria-labelledby="results-heading" id="results-section" style="display:none;">
+    <h2 class="section-heading" id="results-heading"><span class="num">02</span> Transcript</h2>
+
+    <div class="panel" id="confidence-panel" style="display:none; margin-bottom:1.25rem;">
+      <div class="confidence-summary">
+        <div class="figure" id="agg-confidence">—<small>avg. confidence</small></div>
+        <div>
+          <div class="track"><div class="fill" id="agg-confidence-fill"></div></div>
+          <div class="label" id="agg-confidence-detail"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="results-container"></div>
+  </section>
+
+  <section aria-labelledby="method-heading">
+    <h2 class="section-heading" id="method-heading"><span class="num">03</span> Research methodology</h2>
+    <div class="panel">
+      <div class="method-grid">
+        <div class="method-card">
+          <div class="step-num">STAGE 1</div>
+          <h3>Signal preparation</h3>
+          <p>Uploads are downmixed to mono, resampled to 16kHz, high-pass filtered, and spectrally denoised before recognition — the same signal chain used to prepare Nwāchā Munā training audio.</p>
+        </div>
+        <div class="method-card">
+          <div class="step-num">STAGE 2</div>
+          <h3>Speech segmentation</h3>
+          <p>Silero VAD locates true speech/silence boundaries so long recordings are split at natural pauses, never mid-word, before being batched into the recognizer.</p>
+        </div>
+        <div class="method-card">
+          <div class="step-num">STAGE 3</div>
+          <h3>Recognition</h3>
+          <p>Transcription is performed by NepConformer, a Conformer-based acoustic model fine-tuned for Nepal Bhasa, producing per-word confidence alongside text.</p>
+        </div>
+        <div class="method-card">
+          <div class="step-num">STAGE 4</div>
+          <h3>Correction</h3>
+          <p>A SymSpell-based noisy-channel corrector, weighted with a KenLM language model and a proper-noun gazetteer, resolves ASR output against known Nepal Bhasa vocabulary and named entities.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="credits-heading">
+    <h2 class="section-heading" id="credits-heading"><span class="num">04</span> Credits &amp; data sources</h2>
+    <div class="panel">
+      <div class="credit-groups">
+        <div>
+          <h3>Models &amp; tooling</h3>
+          <ul class="credit-list">
+            <li>NVIDIA NeMo</li>
+            <li>NepConformer</li>
+            <li>KenLM</li>
+            <li>SymSpell</li>
+            <li>Silero VAD</li>
+            <li>PyTorch</li>
+            <li>Hugging Face</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Language data</h3>
+          <ul class="credit-list">
+            <li>Nwāchā Munā Corpus</li>
+            <li>OpenSLR&nbsp;54</li>
+            <li>Newari Wikipedia — <a href="https://new.wikipedia.org" target="_blank" rel="noopener">new.wikipedia.org</a></li>
+            <li>Wikimedia dataset dumps — <a href="https://dumps.wikimedia.org" target="_blank" rel="noopener">dumps.wikimedia.org</a></li>
+            <li>OSCAR Corpus</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="repo-heading">
+    <h2 class="section-heading" id="repo-heading"><span class="num">05</span> Repository</h2>
+    <div class="panel repo-panel">
+      <code>github.com/PrageshShrestha/newari_translation</code>
+      <a class="repo-link" href="https://github.com/PrageshShrestha/newari_translation" target="_blank" rel="noopener">View source &rarr;</a>
+    </div>
+  </section>
+
 </main>
 
 <footer class="site-footer">
   <div class="inner">
-    <p>Audio is processed locally and deleted immediately after transcription.</p>
+    <p class="foot-word">Shruti</p>
+    <p class="foot-tagline">Nepal Bhasa Speech Recognition and Language Preservation Platform</p>
+
+    <p>
+      Built using NVIDIA NeMo, NepConformer, KenLM, SymSpell, Silero VAD,
+      PyTorch, and Hugging Face infrastructure.
+    </p>
+    <p>
+      Research resources include the Nwāchā Munā Corpus, OpenSLR&nbsp;54,
+      Newari Wikipedia (new.wikipedia.org), the Wikimedia dataset dumps, and
+      the OSCAR Corpus.
+    </p>
+
+    <div class="privacy-note">
+      <p style="margin:0;">
+        Audio is securely processed using cloud-hosted speech models.
+        Temporary uploads are automatically removed after transcription completes.
+      </p>
+    </div>
+
+    <p>
+      Source code: <a href="https://github.com/PrageshShrestha/newari_translation" target="_blank" rel="noopener">github.com/PrageshShrestha/newari_translation</a>
+    </p>
   </div>
 </footer>
 
@@ -877,9 +1329,18 @@ INDEX_HTML = r"""
   var filenameEl = document.getElementById('filename');
   var transcribeBtn = document.getElementById('transcribe-btn');
   var statusEl = document.getElementById('status');
+  var stepperEl = document.getElementById('stepper');
   var errorContainer = document.getElementById('error-container');
+  var resultsSection = document.getElementById('results-section');
   var resultsContainer = document.getElementById('results-container');
+  var confidencePanel = document.getElementById('confidence-panel');
+  var aggConfidenceEl = document.getElementById('agg-confidence');
+  var aggConfidenceFillEl = document.getElementById('agg-confidence-fill');
+  var aggConfidenceDetailEl = document.getElementById('agg-confidence-detail');
   var selectedFile = null;
+
+  var STEP_IDS = ['step-upload', 'step-preprocess', 'step-asr', 'step-correct', 'step-done'];
+  var stepTimer = null;
 
   function setFile(file) {
     selectedFile = file;
@@ -923,6 +1384,51 @@ INDEX_HTML = r"""
     return m + ':' + (s < 10 ? '0' : '') + s;
   }
 
+  function resetStepper() {
+    STEP_IDS.forEach(function (id) {
+      var el = document.getElementById(id);
+      el.classList.remove('done', 'current');
+    });
+  }
+
+  function setStep(index, markPreviousDone) {
+    STEP_IDS.forEach(function (id, i) {
+      var el = document.getElementById(id);
+      el.classList.remove('done', 'current');
+      if (i < index) { el.classList.add('done'); }
+      else if (i === index) { el.classList.add('current'); }
+    });
+  }
+
+  function startStepperSimulation() {
+    resetStepper();
+    stepperEl.classList.add('active');
+    var i = 0;
+    setStep(i);
+    stepTimer = setInterval(function () {
+      // Advance through upload -> preprocess -> asr, then hold at "asr"
+      // until the request actually resolves (we don't have a real
+      // progress stream from the server, so the first three states are a
+      // reasonable, honest approximation of a short pipeline that's
+      // genuinely running in that order).
+      if (i < 2) {
+        i += 1;
+        setStep(i);
+      }
+    }, 900);
+  }
+
+  function finishStepperSimulation() {
+    if (stepTimer) { clearInterval(stepTimer); stepTimer = null; }
+    setStep(3);
+    setTimeout(function () { setStep(4); }, 350);
+  }
+
+  function abortStepperSimulation() {
+    if (stepTimer) { clearInterval(stepTimer); stepTimer = null; }
+    stepperEl.classList.remove('active');
+  }
+
   function renderCorrectedWithHighlights(correctedText, changes) {
     if (!changes || !changes.length) { return escapeHtml(correctedText); }
     var correctedSet = {};
@@ -937,47 +1443,63 @@ INDEX_HTML = r"""
     }).join('');
   }
 
+  function confidenceBadge(avgConfidence) {
+    if (avgConfidence === null || avgConfidence === undefined) {
+      return '<span class="conf-badge">— confidence</span>';
+    }
+    var pct = Math.round(avgConfidence * 100);
+    var cls = avgConfidence < 0.6 ? 'conf-badge low' : 'conf-badge';
+    return '<span class="' + cls + '">' + pct + '% confidence</span>';
+  }
+
   function renderResults(data) {
     resultsContainer.innerHTML = '';
     errorContainer.innerHTML = '';
 
     if (!data.sentences || !data.sentences.length) {
-      resultsContainer.innerHTML =
-        '<p>No speech was detected in this recording.</p>';
+      resultsContainer.innerHTML = '<p class="empty-note">No speech was detected in this recording.</p>';
+      resultsSection.style.display = 'block';
+      confidencePanel.style.display = 'none';
       return;
     }
 
-    var html = '<h2 class="section-heading">Transcript</h2>';
-    html += '<table class="sentence-table">';
-    html += '<caption class="visually-hidden">Transcribed sentences with corrections and confidence</caption>';
-    html += '<thead><tr>' +
-      '<th scope="col">Time</th>' +
-      '<th scope="col">As heard</th>' +
-      '<th scope="col">Corrected</th>' +
-      '<th scope="col">Confidence</th>' +
-      '</tr></thead><tbody>';
+    // Aggregate confidence summary
+    if (data.avg_confidence !== null && data.avg_confidence !== undefined) {
+      var pct = Math.round(data.avg_confidence * 100);
+      aggConfidenceEl.innerHTML = pct + '%<small>avg. confidence</small>';
+      aggConfidenceFillEl.style.width = pct + '%';
+      aggConfidenceDetailEl.textContent = data.sentences.length + ' sentence' +
+        (data.sentences.length === 1 ? '' : 's') + ' transcribed';
+      confidencePanel.style.display = 'block';
+    } else {
+      confidencePanel.style.display = 'none';
+    }
 
+    var html = '';
     var allChanges = [];
 
     data.sentences.forEach(function (s) {
-      var confPct = (s.avg_confidence !== null && s.avg_confidence !== undefined)
-        ? Math.round(s.avg_confidence * 100) + '%' : '—';
-      var confClass = (s.avg_confidence !== null && s.avg_confidence !== undefined && s.avg_confidence < 0.6)
-        ? ' class="confidence conf-low"' : ' class="confidence"';
-
-      html += '<tr>';
-      html += '<td class="timestamp">' + formatTimestamp(s.start) + '</td>';
-      html += '<td>' + escapeHtml(s.text) + '</td>';
-      html += '<td>' + renderCorrectedWithHighlights(s.corrected_text, s.changes) + '</td>';
-      html += '<td' + confClass + '>' + confPct + '</td>';
-      html += '</tr>';
+      html += '<article class="transcript-card">';
+      html += '<div class="meta-row">';
+      html += '<span class="timestamp">' + formatTimestamp(s.start) + '</span>';
+      html += confidenceBadge(s.avg_confidence);
+      html += '</div>';
+      html += '<div class="pair">';
+      html += '<div class="col">';
+      html += '<div class="col-label">As heard</div>';
+      html += '<div class="devanagari-text">' + escapeHtml(s.text) + '</div>';
+      html += '</div>';
+      html += '<div class="col corrected">';
+      html += '<div class="col-label">Corrected</div>';
+      html += '<div class="devanagari-text">' + renderCorrectedWithHighlights(s.corrected_text, s.changes) + '</div>';
+      html += '</div>';
+      html += '</div>';
+      html += '</article>';
 
       if (s.changes && s.changes.length) {
         allChanges = allChanges.concat(s.changes);
       }
     });
-
-    html += '</tbody></table>';
 
     if (allChanges.length) {
       html += '<details class="changes-detail">';
@@ -985,12 +1507,15 @@ INDEX_HTML = r"""
         (allChanges.length === 1 ? '' : 's') + ' applied</summary>';
       html += '<ul class="change-list">';
       allChanges.forEach(function (c) {
-        html += '<li>' + escapeHtml(c.original) + ' &rarr; ' + escapeHtml(c.corrected) + '</li>';
+        html += '<li><span class="from">' + escapeHtml(c.original) + '</span>' +
+          '<span class="arrow">&rarr;</span>' +
+          '<span class="to">' + escapeHtml(c.corrected) + '</span></li>';
       });
       html += '</ul></details>';
     }
 
     resultsContainer.innerHTML = html;
+    resultsSection.style.display = 'block';
   }
 
   function renderError(message) {
@@ -999,6 +1524,7 @@ INDEX_HTML = r"""
       '<h2>There is a problem</h2>' +
       '<p>' + escapeHtml(message) + '</p>' +
       '</div>';
+    resultsSection.style.display = 'none';
     resultsContainer.innerHTML = '';
   }
 
@@ -1009,7 +1535,9 @@ INDEX_HTML = r"""
     statusEl.removeAttribute('data-state');
     statusEl.textContent = 'Transcribing recording. This may take a moment.';
     errorContainer.innerHTML = '';
+    resultsSection.style.display = 'none';
     resultsContainer.innerHTML = '';
+    startStepperSimulation();
 
     var formData = new FormData();
     formData.append('audio', selectedFile);
@@ -1023,16 +1551,19 @@ INDEX_HTML = r"""
       .then(function (result) {
         transcribeBtn.disabled = false;
         if (!result.ok || result.data.error) {
+          abortStepperSimulation();
           statusEl.setAttribute('data-state', 'error');
           statusEl.textContent = 'Transcription failed.';
           renderError(result.data.error || 'An unknown error occurred.');
           return;
         }
+        finishStepperSimulation();
         statusEl.textContent = 'Transcription complete.';
         renderResults(result.data);
       })
       .catch(function (err) {
         transcribeBtn.disabled = false;
+        abortStepperSimulation();
         statusEl.setAttribute('data-state', 'error');
         statusEl.textContent = 'Transcription failed.';
         renderError('Could not reach the server: ' + err.message);
