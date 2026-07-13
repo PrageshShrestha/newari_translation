@@ -20,6 +20,7 @@ import struct
 import math
 import statistics
 import unicodedata
+import csv
 from collections import defaultdict
 
 
@@ -98,18 +99,25 @@ def deletes(word, max_dist):
         frontier = new_frontier
     return results
 
-
+from typing import Tuple, List, Dict
 class CorrectionEngine:
     """Loads dictionary.bin / symspell_index.bin / bigrams.bin and exposes
     correct_text(), matching the notebook's noisy-channel corrector."""
 
-    def __init__(self, artifacts_dir="artifacts"):
+    def __init__(self, artifacts_dir="artifacts", confusion_csv=None):
         self.artifacts_dir = artifacts_dir
         self._load_dictionary(f"{artifacts_dir}/dictionary.bin")
         self._load_symspell_index(f"{artifacts_dir}/symspell_index.bin")
         self._load_bigrams(f"{artifacts_dir}/bigrams.bin")
         self.total_unigrams = sum(self.counts)
         self._load_gazetteer_if_present(f"{artifacts_dir}/gazetteer_everestner.txt")
+        # Store vocab as set for fast membership checking
+        self.vocab_set = set(self.words)
+        # Load confusion pairs if provided
+        self.word_confusion = {}
+        if confusion_csv and os.path.exists(confusion_csv):
+            self._load_confusion_pairs(confusion_csv)
+            print(f"[correction_engine] Loaded confusion pairs: {len(self.word_confusion)} entries")
 
     # ---- loaders -----------------------------------------------------
 
@@ -191,8 +199,36 @@ class CorrectionEngine:
 
         if n_new:
             self.total_unigrams = sum(self.counts)
+            # Update vocab set with new words
+            self.vocab_set = set(self.words)
         print(f"[correction_engine] Gazetteer '{path}': merged {n_new} new proper-noun "
               f"entries (fallback_count={fallback_count}). Vocab size now {len(self.words)}.")
+
+    def _load_confusion_pairs(self, csv_path, min_count=3):
+        """Load word substitution pairs from a CSV file."""
+        if not os.path.exists(csv_path):
+            return
+        
+        with open(csv_path, encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                ref = row['reference_token'].strip()
+                mis = row['misrecognized_as'].strip()
+                # Skip placeholders
+                if mis in ('⁇', '?', '', '??', '⁇', '?', '??'):
+                    continue
+                try:
+                    count = int(row['count_before_correction'])
+                except (ValueError, KeyError):
+                    count = 1
+                
+                # Only use frequent pairs to avoid over-correction
+                if count < min_count:
+                    continue
+                    
+                if mis not in self.word_confusion:
+                    self.word_confusion[mis] = {}
+                self.word_confusion[mis][ref] = self.word_confusion[mis].get(ref, 0) + count
 
     # ---- scoring --------------------------------------------------
 
@@ -235,12 +271,72 @@ class CorrectionEngine:
         scored.sort(key=lambda x: -x[1])
         return scored[:top_k]
 
-    def correct_text(self, text: str, min_score_gap: float = 0.0):
-        """Autocorrect a full string, preserving whitespace/punctuation, and
-        return (corrected_text, list_of_change_dicts) for UI diff rendering."""
-        text = clean_text(text)
-        pieces = re.split(r"([\u0900-\u097F:]+)", text)
+    
+    def _apply_confusion_correction(self, text: str) -> Tuple[str, List[Dict[str, str]]]:
+        """Apply confusion-based correction to ALL words, not just unknown ones."""
+        if not self.word_confusion:
+            return text, []
 
+        # Split the same way Pass 1 and the rest of the codebase do: capture
+        # Devanagari word-runs and leave everything else (punctuation, danda,
+        # whitespace) untouched and in place. Plain `text.split()` (whitespace
+        # only) would leave punctuation glued to a word (e.g. "शब्द।"), which
+        # then never exactly matches a word_confusion key -- silently losing
+        # matches whenever ASR/reference output includes any punctuation.
+        pieces = re.split(r"([\u0900-\u097F:]+)", text)
+        word_positions = [i for i, p in enumerate(pieces) if WORD_RE.fullmatch(p)]
+        words = [pieces[i] for i in word_positions]
+        if not words:
+            return text, []
+
+        changes = []
+        new_words = list(words)
+        n = len(words)
+
+        for i, w in enumerate(words):
+            # Check if this word has a confusion mapping
+            if w not in self.word_confusion:
+                continue
+
+            candidates = self.word_confusion[w]
+            # Filter to candidates that exist in vocabulary
+            valid = [(cand, count) for cand, count in candidates.items() if cand in self.vocab_set]
+            if not valid:
+                continue
+
+            # Score with bigram context
+            def score(cand: str, count: int) -> float:
+                s = float(count)
+                if i > 0 and (words[i-1], cand) in self.bigram:
+                    s *= self.bigram[(words[i-1], cand)]
+                if i < n-1 and (cand, words[i+1]) in self.bigram:
+                    s *= self.bigram[(cand, words[i+1])]
+                return s
+
+            best_cand = max(valid, key=lambda x: score(x[0], x[1]))[0]
+            if best_cand != w:
+                changes.append({'original': w, 'corrected': best_cand})
+                new_words[i] = best_cand
+
+        if not changes:
+            return text, []
+
+        for pos, new_word in zip(word_positions, new_words):
+            pieces[pos] = new_word
+        return "".join(pieces), changes
+
+
+
+
+    def correct_text(self, text: str, min_score_gap: float = 0.0):
+        """Autocorrect with two-pass approach:
+        1. Standard correction (unknown words only)
+        2. Confusion correction (ALL words, using ASR error patterns)
+        """
+        text = clean_text(text)
+
+        # Pass 1: Standard correction for unknown words
+        pieces = re.split(r"([\u0900-\u097F:]+)", text)
         corrected_pieces = []
         changes = []
         prev_word = None
@@ -248,8 +344,8 @@ class CorrectionEngine:
         for piece in pieces:
             if WORD_RE.fullmatch(piece):
                 word = piece
-
-                if word in self.word_to_id:
+                # Only correct if word is NOT in vocabulary
+                if word in self.vocab_set:
                     corrected_pieces.append(word)
                     prev_word = word
                     continue
@@ -268,8 +364,12 @@ class CorrectionEngine:
                 scored.sort(key=lambda x: -x[1])
 
                 best_word, best_score = scored[0]
-                typed_as_is_score = self.lm_logprob(word, prev_word) if word in self.word_to_id else float("-inf")
-
+                # word is OOV here (we already returned above if word in vocab_set),
+                # so this mirrors the notebook's own comparison: the typed word gets
+                # its own (very low, OOV) lm_logprob, and best_word must beat it by
+                # at least min_score_gap -- min_score_gap actually does something now,
+                # instead of the previous hardcoded, non-adaptive `> -10.0` cutoff.
+                typed_as_is_score = self.lm_logprob(word, prev_word)
                 if best_score - typed_as_is_score >= min_score_gap and best_word != word:
                     corrected_pieces.append(best_word)
                     changes.append({"original": word, "corrected": best_word})
@@ -280,4 +380,17 @@ class CorrectionEngine:
             else:
                 corrected_pieces.append(piece)
 
-        return "".join(corrected_pieces), changes
+        corrected_text = "".join(corrected_pieces)
+        
+        # Pass 2: ALWAYS apply confusion correction to ALL words
+        if self.word_confusion:
+            confusion_corrected, conf_changes = self._apply_confusion_correction(corrected_text)
+            if conf_changes:
+                # Merge changes, avoiding duplicates
+                existing_originals = {c['original'] for c in changes}
+                for c in conf_changes:
+                    if c['original'] not in existing_originals:
+                        changes.append(c)
+                corrected_text = confusion_corrected
+        
+        return corrected_text, changes

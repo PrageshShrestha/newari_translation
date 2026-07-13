@@ -1,73 +1,187 @@
-# श्रुति (Shruti) — Newari ASR + Autocorrect, unified local app
+markdown
 
-One script (`run_browser.py`) that runs a small local website:
-drag an audio clip in → NeMo ASR transcribes it → the notebook's
-SymSpell + noisy-channel autocorrector cleans it up → both versions,
-plus per-word confidence, are shown side by side.
+# Shruti - Newari ASR + Autocorrect Application
 
-## 1. Put your exported artifacts here
+Unified local web application that provides speech-to-text transcription and autocorrection for Newari (Nepal Bhasa) audio files.
 
-Copy the three files the notebook already generated for you into `artifacts/`:
+## Architecture Overview
 
-```
+The application consists of three main components:
+
+1. **ASR Engine**: NeMo-based Conformer model (NwachaMuna-NepConformer-Aug) for speech recognition
+2. **Correction Engine**: SymSpell + noisy-channel autocorrector with vocabulary and bigram language model
+3. **Web Interface**: Flask-based single-page application with drag-and-drop audio upload
+
+## Artifacts
+
+The correction engine requires three binary files in the `artifacts/` directory:
+
 newari_asr_app/
-  artifacts/
-    dictionary.bin
-    symspell_index.bin
-    bigrams.bin
-```
+artifacts/
+dictionary.bin # Word list with quantized unigram log-probabilities
+symspell_index.bin # Delete-variant lookup index for SymSpell
+bigrams.bin # Word pair frequency counts (word_id_a, word_id_b, count)
+text
 
-## 2. Install dependencies
+
+Optional file for gazetteer support:
+
+gazetteer_everestner.txt # Proper-noun entities from EverestNER
+text
+
+
+Optional file for confusion-based correction:
+
+word_substitution_pairs.csv # Observed ASR substitution patterns from evaluation
+text
+
+
+## Installation
+
+Install required dependencies:
 
 ```bash
-pip install flask nemo_toolkit[asr] omegaconf torch
-```
+pip install flask nemo_toolkit[asr] omegaconf torch soundfile scipy
 
-(`nemo_toolkit[asr]` is the same package your ASR snippet already depends on —
-skip this step if your environment already has it.)
+Running the Application
 
-## 3. Run it
+Start the web server:
+bash
 
-```bash
 cd newari_asr_app
 python run_browser.py
-```
 
-Then open **http://127.0.0.1:5000** in your browser.
+Navigate to http://127.0.0.1:5000 in a web browser.
+Usage
 
-- Drag a `.wav` / `.flac` / `.mp3` / `.ogg` / `.m4a` file onto the drop zone
-  (or click it to pick a file), then click **Transcribe & Correct**.
-- The ASR model loads once, the first time you transcribe (this can take a
-  little while); after that, requests are fast.
-- Left panel: raw ASR output, with any word the model was under ~60%
-  confident on underlined in red.
-- Right panel: the autocorrected version, with every word the corrector
-  changed highlighted in gold.
-- Below that: an explicit list of every correction made (original → fixed),
-  and an average-confidence bar for the transcription.
+    Drag an audio file (.wav, .flac, .mp3, .ogg, .m4a) onto the drop zone or click to select a file
 
-## How it's wired together
+    Click "Transcribe & Correct"
 
-- `correction_engine.py` is a standalone reader for the three `.bin`
-  artifacts — it re-implements the exact same `deletes()`,
-  `weighted_edit_distance()`, `lm_logprob()`, and `correct_text()` logic
-  from the notebook, just reading from the compact binary files instead of
-  keeping the training-time Python dictionaries in memory. You can also
-  `import correction_engine` and use it on its own, outside the web app.
-- `run_browser.py` is a single Flask app: it loads the ASR model and the
-  `CorrectionEngine` once at first use, serves the UI, and exposes one
-  endpoint, `POST /api/transcribe`, that a dropped file is sent to and that
-  returns JSON with the raw text, corrected text, per-word confidences, and
-  the list of changes. Everything stays on your machine — no external calls
-  besides loading fonts from Google Fonts.
+    The application displays:
 
-## Notes
+        Raw ASR output (left panel)
 
-- If `dictionary.bin` / `symspell_index.bin` / `bigrams.bin` are missing from
-  `artifacts/`, `CorrectionEngine` will raise a clear `FileNotFoundError`
-  when the first request comes in — check the path in `ARTIFACTS_DIR` at the
-  top of `run_browser.py` if you keep them somewhere else.
-- Uploaded audio is saved to `uploads/` only for the duration of processing
-  and deleted immediately after (success or failure).
-- If your NeMo model version doesn't populate `hyp.word_confidence`, the app
-  just skips the confidence highlighting/bar and shows the transcript as-is.
+        Autocorrected text (right panel)
+
+        List of corrections applied
+
+        Average confidence score
+
+Correction Engine
+
+The CorrectionEngine class provides text correction functionality:
+python
+
+from correction_engine import CorrectionEngine
+
+# Initialize with artifacts directory
+engine = CorrectionEngine(artifacts_dir="artifacts")
+
+# Optional: load confusion pairs from evaluation run
+engine = CorrectionEngine(
+    artifacts_dir="artifacts",
+    confusion_csv="word_substitution_pairs.csv"
+)
+
+# Correct text
+corrected_text, changes = engine.correct_text("misrecognized text")
+
+Correction Pipeline
+
+    Vocabulary Check: Words already in the training vocabulary are preserved unchanged (prevents over-correction)
+
+    SymSpell Lookup: Unknown words are looked up via delete-variant index
+
+    Weighted Edit Distance: Candidates are scored using phonetically-aware substitution costs
+
+    Language Model Scoring: Unigram and bigram probabilities from training corpus
+
+    Confusion-based Correction (optional): Applies observed ASR substitution patterns as a second pass
+
+Configuration Parameters
+
+    MAX_EDIT_DISTANCE = 2: Maximum edit distance for SymSpell lookup
+
+    LAMBDA = 3.0: Weight of error cost versus language model score
+
+    CONFUSABLE_GROUPS: Phonetically similar character groups for weighted edit distance
+
+    min_count = 10: Minimum frequency threshold for confusion pairs
+
+Audio Processing
+Preprocessing
+
+    Audio is resampled to 16kHz mono (ASR model requirement)
+
+    Multi-channel audio is downmixed to mono
+
+    Supported formats: WAV, FLAC, MP3, OGG, M4A
+
+Segmentation
+
+Long audio files are split using Silero VAD (Voice Activity Detection):
+
+    Speech regions are detected and merged if separated by short pauses
+
+    Minimum speech segment length: 0.2 seconds
+
+    Maximum chunk length: 15 seconds (safety cap)
+
+    VAD fallback: fixed-window splitting if VAD unavailable
+
+File Structure
+text
+
+newari_asr_app/
+├── run_browser.py           # Flask web application
+├── correction_engine.py     # Standalone correction engine
+├── artifacts/               # Required binary artifacts
+│   ├── dictionary.bin
+│   ├── symspell_index.bin
+│   └── bigrams.bin
+├── uploads/                 # Temporary audio storage (auto-cleaned)
+└── README.md
+
+Evaluation
+
+For performance evaluation and confusion pair generation, use the companion script:
+bash
+
+python evaluate_asr_and_correction.py \
+    --data-dir ./datasets \
+    --artifacts-dir ./newari_asr_app/artifacts \
+    --asr-model "ilprl-docse/NwachaMuna-NepConformer-Aug" \
+    --output-dir ./results \
+    --splits train validation test
+
+The evaluation script produces:
+
+    word_substitution_pairs.csv: Observed ASR confusion patterns
+
+    char_substitution_pairs.csv: Character-level confusion patterns
+
+    per_utterance_results.csv: Detailed utterance-level metrics
+
+    corpus_summary.json: Aggregate WER/CER statistics
+
+Dependencies
+
+    Flask (web server)
+
+    NeMo Toolkit (ASR model)
+
+    SoundFile (audio I/O)
+
+    SciPy (resampling)
+
+    PyTorch (deep learning framework)
+
+    Silero VAD (voice activity detection)
+
+License
+
+This project is for research and development purposes. ASR model weights and training data are subject to their respective licenses.
+Development Notes
+
+The correction_engine.py module can be used independently of the web application for batch processing or integration with other services. The engine loads all artifacts once at initialization and maintains them in memory for fast inference.
