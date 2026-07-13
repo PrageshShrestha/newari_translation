@@ -3,7 +3,8 @@ run_browser.py
 
 Unified local web app:
 
-    audio file (drag & drop) --> NeMo ASR (NwachaMuna-NepConformer-Aug)
+    audio file (drag & drop, OR recorded live in the browser mic)
+                              --> NeMo ASR (NwachaMuna-NepConformer-Aug)
                               --> Newari autocorrect (correction_engine.py)
                               --> rendered side-by-side in the browser
 
@@ -12,6 +13,13 @@ the ASR model (one batched transcribe() call over all chunks), and the
 per-chunk outputs are stitched back together before autocorrect runs on
 the full text -- so everything downstream of raw_text/word_confidence is
 unchanged.
+
+Both upload paths (drag-and-drop file, and in-browser microphone recording)
+converge on the exact same /api/transcribe endpoint and the exact same
+preprocess_audio_for_asr() -> get_speech_segments() -> transcribe() ->
+correct_text() pipeline below -- a mic recording is just another audio
+file as far as the backend is concerned, it only differs in how the
+browser produced it (see MIME/container note next to ALLOWED_EXT).
 
 Run:
     python run_browser.py
@@ -28,6 +36,8 @@ Expects the three exported artifacts from the autocorrect notebook to be in
 
 import os
 import time
+import shutil
+import subprocess
 import traceback
 import numpy as np
 import soundfile as sf
@@ -87,7 +97,12 @@ UPLOAD_DIR = os.path.join(APP_DIR, "uploads")
 ARTIFACTS_DIR = os.path.join(APP_DIR, "artifacts")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-ALLOWED_EXT = {".wav", ".flac", ".mp3", ".ogg", ".m4a"}
+# .webm and .ogg are included specifically for in-browser microphone
+# recordings: MediaRecorder in Chrome/Firefox/Edge produces audio/webm
+# (Opus) by default, and Safari/some mobile browsers fall back to
+# audio/mp4 or audio/ogg depending on what codecs are available -- so all
+# of these need to be accepted uploads, not just the "file picker" formats.
+ALLOWED_EXT = {".wav", ".flac", ".mp3", ".ogg", ".m4a", ".webm", ".mp4"}
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB
@@ -252,6 +267,38 @@ def enhance_audio_for_asr(data: np.ndarray, sr: int) -> np.ndarray:
     return data
 
 
+def _ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None
+
+
+def _convert_with_ffmpeg(input_path: str, target_sr: int) -> str:
+    """Decodes any container/codec ffmpeg understands (webm/Opus and
+    mp4/AAC in particular -- the formats produced by browser MediaRecorder,
+    which libsndfile/soundfile cannot read directly) into a temporary mono
+    WAV at target_sr. Raises if ffmpeg is missing or the conversion fails,
+    so the caller can surface a clear error instead of a confusing
+    downstream soundfile crash."""
+    if not _ffmpeg_available():
+        raise RuntimeError(
+            "This audio format needs ffmpeg to decode (e.g. a browser "
+            "microphone recording) but ffmpeg is not installed on the "
+            "server. Install ffmpeg, or upload a .wav/.flac file instead."
+        )
+    tmp_path = input_path + ".decoded.wav"
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", input_path,
+            "-ac", "1", "-ar", str(target_sr),
+            tmp_path,
+        ],
+        capture_output=True,
+    )
+    if result.returncode != 0 or not os.path.exists(tmp_path):
+        stderr_tail = result.stderr.decode("utf-8", errors="ignore")[-500:]
+        raise RuntimeError(f"ffmpeg could not decode this audio file: {stderr_tail}")
+    return tmp_path
+
+
 def preprocess_audio_for_asr(input_path: str, output_path: str,
                               target_sr: int = ASR_TARGET_SAMPLE_RATE) -> None:
     """Reads any audio soundfile can open, downmixes to mono if needed,
@@ -261,26 +308,47 @@ def preprocess_audio_for_asr(input_path: str, output_path: str,
     transcribe() expects a plain (time,) mono signal at the model's trained
     sample rate, and does not do this conversion itself.
 
+    Browser microphone recordings arrive as webm/Opus (or occasionally
+    mp4/AAC on Safari) rather than a libsndfile-readable container, so
+    sf.read() is tried first for the common file-upload case and, if that
+    fails, falls back to an ffmpeg decode pass -- this is what lets a mic
+    recording go through the exact same function as a dropped-in file.
+
     Also runs the noise/normalization enhancement chain (see
     enhance_audio_for_asr) before writing, since VAD and ASR both do better
     on a cleaned signal than the raw upload."""
-    data, sr = sf.read(input_path, always_2d=True)  # shape: (frames, channels)
+    decoded_tmp_path = None
+    try:
+        data, sr = sf.read(input_path, always_2d=True)  # shape: (frames, channels)
+    except Exception:
+        # Not something libsndfile can open directly -- most commonly a
+        # browser mic recording (webm/Opus, mp4/AAC). Decode via ffmpeg and
+        # retry the read against the decoded wav.
+        decoded_tmp_path = _convert_with_ffmpeg(input_path, target_sr)
+        data, sr = sf.read(decoded_tmp_path, always_2d=True)
 
-    # Downmix to mono by averaging channels (stereo/multi-channel -> mono).
-    if data.shape[1] > 1:
-        data = data.mean(axis=1)
-    else:
-        data = data[:, 0]
+    try:
+        # Downmix to mono by averaging channels (stereo/multi-channel -> mono).
+        if data.shape[1] > 1:
+            data = data.mean(axis=1)
+        else:
+            data = data[:, 0]
 
-    # Resample to the model's expected sample rate if it doesn't already match.
-    if sr != target_sr:
-        g = gcd(sr, target_sr)
-        up, down = target_sr // g, sr // g
-        data = resample_poly(data, up, down)
+        # Resample to the model's expected sample rate if it doesn't already match.
+        if sr != target_sr:
+            g = gcd(sr, target_sr)
+            up, down = target_sr // g, sr // g
+            data = resample_poly(data, up, down)
 
-    data = data.astype(np.float32)
-    data = enhance_audio_for_asr(data, target_sr)
-    sf.write(output_path, data, target_sr, subtype="PCM_16")
+        data = data.astype(np.float32)
+        data = enhance_audio_for_asr(data, target_sr)
+        sf.write(output_path, data, target_sr, subtype="PCM_16")
+    finally:
+        if decoded_tmp_path is not None:
+            try:
+                os.remove(decoded_tmp_path)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------
@@ -414,7 +482,7 @@ def api_transcribe():
 
     ext = os.path.splitext(f.filename)[1].lower()
     if ext not in ALLOWED_EXT:
-        return jsonify({"error": f"Unsupported file type '{ext}'. Use wav/flac/mp3/ogg/m4a."}), 400
+        return jsonify({"error": f"Unsupported file type '{ext}'. Use wav/flac/mp3/ogg/m4a/webm."}), 400
 
     ts = int(time.time() * 1000)
     safe_name = f"upload_{ts}{ext}"
@@ -560,6 +628,7 @@ INDEX_HTML = r"""
     --ink:          #2A1810;
     --paper-line:   rgba(58, 36, 24, 0.10);
     --shadow-warm:  rgba(58, 24, 12, 0.25);
+    --record-red:   #B5301D;
 
     --font-display: "Fraunces", "Noto Serif Devanagari", serif;
     --font-body:    "Fraunces", "Noto Serif Devanagari", serif;
@@ -742,6 +811,40 @@ INDEX_HTML = r"""
     margin-bottom: 0.75rem;
   }
 
+  /* ---------------- Source tabs (Upload file / Record audio) ---------------- */
+  .source-tabs {
+    display: inline-flex;
+    gap: 0.35rem;
+    padding: 0.3rem;
+    background: var(--manuscript-2);
+    border-radius: 8px;
+    margin-bottom: 1.25rem;
+  }
+  .source-tabs button {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    background: transparent;
+    border: none;
+    color: var(--wood-soft);
+    padding: 0.55rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    transition: background .15s ease, color .15s ease;
+  }
+  .source-tabs button svg { flex-shrink: 0; }
+  .source-tabs button:hover { color: var(--wood); }
+  .source-tabs button.active {
+    background: var(--wood);
+    color: var(--gold-soft);
+  }
+  .source-panel { display: none; }
+  .source-panel.active { display: block; }
+
   .dropzone {
     border: 2px dashed var(--copper);
     background: repeating-linear-gradient(45deg, rgba(181,101,29,0.05) 0 10px, transparent 10px 20px);
@@ -773,6 +876,105 @@ INDEX_HTML = r"""
     position: absolute; width: 1px; height: 1px;
     overflow: hidden; clip: rect(0 0 0 0);
   }
+
+  /* ---------------- Recorder panel ---------------- */
+  .recorder {
+    border: 2px dashed var(--copper);
+    background: repeating-linear-gradient(45deg, rgba(181,101,29,0.05) 0 10px, transparent 10px 20px);
+    border-radius: 8px;
+    padding: 2.25rem 1rem;
+    text-align: center;
+  }
+  .recorder.is-recording {
+    border-color: var(--record-red);
+    background: rgba(181,48,29,0.06);
+  }
+  .record-btn {
+    width: 76px; height: 76px;
+    border-radius: 50%;
+    border: none;
+    background: linear-gradient(180deg, var(--record-red), #8a2314);
+    color: var(--manuscript);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 3px 0 #641a0f, 0 10px 20px -8px var(--shadow-warm);
+    transition: transform .12s ease, box-shadow .12s ease;
+    position: relative;
+  }
+  .record-btn:hover { transform: translateY(-1px); }
+  .record-btn:active { box-shadow: 0 1px 0 #641a0f; transform: translateY(2px); }
+  .record-btn .mic-icon { width: 26px; height: 26px; }
+  .record-btn .stop-icon { width: 22px; height: 22px; display: none; }
+  .record-btn.recording {
+    animation: record-pulse 1.4s ease-in-out infinite;
+  }
+  .record-btn.recording .mic-icon { display: none; }
+  .record-btn.recording .stop-icon { display: block; }
+  @keyframes record-pulse {
+    0%, 100% { box-shadow: 0 3px 0 #641a0f, 0 0 0 0 rgba(181,48,29,0.45), 0 10px 20px -8px var(--shadow-warm); }
+    50%      { box-shadow: 0 3px 0 #641a0f, 0 0 0 12px rgba(181,48,29,0), 0 10px 20px -8px var(--shadow-warm); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .record-btn.recording { animation: none; }
+  }
+  .recorder .instruction {
+    margin: 1rem 0 0.2rem;
+    font-size: 1.05rem;
+    color: var(--wood);
+  }
+  .recorder .hint {
+    color: var(--wood-soft);
+    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    margin: 0;
+  }
+  .record-timer {
+    font-family: var(--font-mono);
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: var(--record-red);
+    margin: 0.9rem 0 0;
+    font-variant-numeric: tabular-nums;
+    display: none;
+  }
+  .recorder.is-recording .record-timer { display: block; }
+  .recorder.is-recording .instruction { display: none; }
+
+  .recording-preview {
+    display: none;
+    margin-top: 1.1rem;
+    padding-top: 1rem;
+    border-top: 1px dashed var(--paper-line);
+    align-items: center;
+    justify-content: center;
+    gap: 0.85rem;
+    flex-wrap: wrap;
+  }
+  .recording-preview.active { display: flex; }
+  .recording-preview audio { max-width: 260px; }
+  .btn-text {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--brick);
+    background: none;
+    border: 1px solid var(--brick);
+    border-radius: 6px;
+    padding: 0.5rem 0.9rem;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease;
+  }
+  .btn-text:hover { background: var(--brick); color: var(--manuscript); }
+  .mic-permission-note {
+    display: none;
+    margin-top: 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--brick);
+  }
+  .mic-permission-note.active { display: block; }
 
   button.primary {
     font-family: var(--font-body);
@@ -1166,10 +1368,11 @@ INDEX_HTML = r"""
   <div class="devanagari">श्रुति</div>
   <h1>Speech recognition and language correction for Nepal Bhasa</h1>
   <p class="lede">
-    Upload a Nepal Bhasa recording and receive a research-grade transcription,
-    automatically corrected against a Newari lexicon and named-entity gazetteer,
-    with word-level confidence scoring. Built for the documentation and
-    preservation of the language, not as a general-purpose demo.
+    Upload a Nepal Bhasa recording, or record one directly in your browser,
+    and receive a research-grade transcription, automatically corrected
+    against a Newari lexicon and named-entity gazetteer, with word-level
+    confidence scoring. Built for the documentation and preservation of the
+    language, not as a general-purpose demo.
   </p>
   <div class="rule" aria-hidden="true"></div>
 </div>
@@ -1177,16 +1380,53 @@ INDEX_HTML = r"""
 <main id="main-content">
 
   <section aria-labelledby="upload-heading">
-    <h2 class="section-heading" id="upload-heading"><span class="num">01</span> Upload</h2>
+    <h2 class="section-heading" id="upload-heading"><span class="num">01</span> Provide a recording</h2>
     <div class="panel">
-      <label class="field-label" for="audio-input">Audio file</label>
-      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-describedby="dropzone-hint">
-        <span class="glyph" aria-hidden="true">ॐ</span>
-        <p class="instruction">Drag and drop a recording here, or click to choose a file</p>
-        <p class="hint" id="dropzone-hint">WAV · FLAC · MP3 · OGG · M4A — up to 200MB</p>
-        <p class="filename" id="filename" aria-live="polite"></p>
+
+      <div class="source-tabs" role="tablist" aria-label="Audio source">
+        <button type="button" id="tab-upload" class="active" role="tab" aria-selected="true" aria-controls="panel-upload">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Upload file
+        </button>
+        <button type="button" id="tab-record" role="tab" aria-selected="false" aria-controls="panel-record">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          Record audio
+        </button>
       </div>
-      <input type="file" id="audio-input" accept=".wav,.flac,.mp3,.ogg,.m4a">
+
+      <div class="source-panel active" id="panel-upload" role="tabpanel" aria-labelledby="tab-upload">
+        <label class="field-label" for="audio-input">Audio file</label>
+        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-describedby="dropzone-hint">
+          <span class="glyph" aria-hidden="true">ॐ</span>
+          <p class="instruction">Drag and drop a recording here, or click to choose a file</p>
+          <p class="hint" id="dropzone-hint">WAV · FLAC · MP3 · OGG · M4A — up to 200MB</p>
+          <p class="filename" id="filename" aria-live="polite"></p>
+        </div>
+        <input type="file" id="audio-input" accept=".wav,.flac,.mp3,.ogg,.m4a">
+      </div>
+
+      <div class="source-panel" id="panel-record" role="tabpanel" aria-labelledby="tab-record">
+        <label class="field-label" for="record-btn">Microphone</label>
+        <div class="recorder" id="recorder">
+          <button type="button" class="record-btn" id="record-btn" aria-pressed="false" aria-label="Start recording">
+            <svg class="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            <svg class="stop-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+          </button>
+          <p class="instruction">Tap to start recording</p>
+          <p class="record-timer" id="record-timer" aria-live="polite">0:00</p>
+          <p class="hint">Speak clearly, in a quiet room if possible</p>
+
+          <div class="recording-preview" id="recording-preview">
+            <audio id="recording-audio" controls></audio>
+            <button type="button" class="btn-text" id="record-again-btn">Record again</button>
+          </div>
+
+          <p class="mic-permission-note" id="mic-permission-note" role="alert">
+            Microphone access was denied or is unavailable. Check your browser's
+            site permissions, or use the "Upload file" tab instead.
+          </p>
+        </div>
+      </div>
 
       <p style="margin-top:1.5rem;">
         <button class="primary" id="transcribe-btn" type="button" disabled>
@@ -1233,7 +1473,7 @@ INDEX_HTML = r"""
         <div class="method-card">
           <div class="step-num">STAGE 1</div>
           <h3>Signal preparation</h3>
-          <p>Uploads are downmixed to mono, resampled to 16kHz, high-pass filtered, and spectrally denoised before recognition — the same signal chain used to prepare Nwāchā Munā training audio.</p>
+          <p>Uploads and microphone recordings alike are downmixed to mono, resampled to 16kHz, high-pass filtered, and spectrally denoised before recognition — the same signal chain used to prepare Nwāchā Munā training audio.</p>
         </div>
         <div class="method-card">
           <div class="step-num">STAGE 2</div>
@@ -1311,8 +1551,9 @@ INDEX_HTML = r"""
 
     <div class="privacy-note">
       <p style="margin:0;">
-        Audio is securely processed using cloud-hosted speech models.
-        Temporary uploads are automatically removed after transcription completes.
+        Audio (uploaded or recorded in-browser) is securely processed using
+        cloud-hosted speech models. Temporary files are automatically
+        removed after transcription completes.
       </p>
     </div>
 
@@ -1337,15 +1578,85 @@ INDEX_HTML = r"""
   var aggConfidenceEl = document.getElementById('agg-confidence');
   var aggConfidenceFillEl = document.getElementById('agg-confidence-fill');
   var aggConfidenceDetailEl = document.getElementById('agg-confidence-detail');
+
+  // Source tabs (Upload file / Record audio)
+  var tabUpload = document.getElementById('tab-upload');
+  var tabRecord = document.getElementById('tab-record');
+  var panelUpload = document.getElementById('panel-upload');
+  var panelRecord = document.getElementById('panel-record');
+
+  // Recorder elements
+  var recorderEl = document.getElementById('recorder');
+  var recordBtn = document.getElementById('record-btn');
+  var recordTimerEl = document.getElementById('record-timer');
+  var recordingPreview = document.getElementById('recording-preview');
+  var recordingAudioEl = document.getElementById('recording-audio');
+  var recordAgainBtn = document.getElementById('record-again-btn');
+  var micPermissionNote = document.getElementById('mic-permission-note');
+
+  // selectedFile always holds whatever should be POSTed to /api/transcribe --
+  // it's set either from the file picker/drop, or from the mic recording
+  // blob below. The rest of the transcribe flow (transcribeBtn handler)
+  // doesn't need to know or care which source it came from.
   var selectedFile = null;
 
   var STEP_IDS = ['step-upload', 'step-preprocess', 'step-asr', 'step-correct', 'step-done'];
   var stepTimer = null;
 
-  function setFile(file) {
+  // ---------------- Source tab switching ----------------
+  function activateTab(which) {
+    var uploading = which === 'upload';
+    tabUpload.classList.toggle('active', uploading);
+    tabRecord.classList.toggle('active', !uploading);
+    tabUpload.setAttribute('aria-selected', String(uploading));
+    tabRecord.setAttribute('aria-selected', String(!uploading));
+    panelUpload.classList.toggle('active', uploading);
+    panelRecord.classList.toggle('active', !uploading);
+    // Switching source clears whichever selection belonged to the other tab,
+    // so the user can't accidentally submit a stale file from the tab they
+    // just left.
+    if (uploading) {
+      if (recordedBlobFile) { discardRecording(); }
+    } else {
+      if (fileInput.value) {
+        fileInput.value = '';
+        filenameEl.textContent = '';
+      }
+    }
+    updateSelection();
+  }
+  tabUpload.addEventListener('click', function () { activateTab('upload'); });
+  tabRecord.addEventListener('click', function () { activateTab('record'); });
+
+  function updateSelection() {
+    var activeIsUpload = tabUpload.classList.contains('active');
+    var file = activeIsUpload ? fileInputSelection() : recordedBlobFile;
     selectedFile = file;
-    filenameEl.textContent = file ? file.name : '';
     transcribeBtn.disabled = !file;
+  }
+
+  function fileInputSelection() {
+    return (fileInput.files && fileInput.files.length) ? fileInput.files[0] : null;
+  }
+
+  // ---------------- File upload (drag & drop / picker) ----------------
+  function setFile(file) {
+    fileInput.__dtFile = file; // not used elsewhere, kept for clarity only
+    filenameEl.textContent = file ? file.name : '';
+    // Reflect the drop into the actual <input type=file> via DataTransfer
+    // where supported, so both drag-drop and click-to-pick end up going
+    // through the same fileInputSelection() path.
+    try {
+      var dt = new DataTransfer();
+      dt.items.add(file);
+      fileInput.files = dt.files;
+    } catch (e) {
+      // Safari-era fallback: DataTransfer construction can be unsupported;
+      // updateSelection() below still works because we track selectedFile
+      // directly in that case via the dropped file object.
+      fileInput.__droppedFile = file;
+    }
+    updateSelection();
   }
 
   dropzone.addEventListener('click', function () { fileInput.click(); });
@@ -1368,10 +1679,150 @@ INDEX_HTML = r"""
   });
   fileInput.addEventListener('change', function () {
     if (fileInput.files && fileInput.files.length) {
-      setFile(fileInput.files[0]);
+      filenameEl.textContent = fileInput.files[0].name;
     }
+    updateSelection();
   });
 
+  // ---------------- Microphone recording ----------------
+  var mediaRecorder = null;
+  var mediaStream = null;
+  var recordedChunks = [];
+  var recordedBlobFile = null;   // File object built from the recording, once stopped
+  var isRecording = false;
+  var recordStartTime = null;
+  var recordTimerInterval = null;
+
+  // Pick the first mimeType the browser's MediaRecorder actually supports,
+  // in order of preference. Different browsers expose different encoders --
+  // Chrome/Firefox/Edge support Opus-in-WebM, Safari generally only supports
+  // mp4/AAC -- so this has to be checked at runtime rather than hardcoded.
+  function pickSupportedMimeType() {
+    var candidates = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/mp4',
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(candidates[i])) {
+        return candidates[i];
+      }
+    }
+    return ''; // let the browser pick its own default as a last resort
+  }
+
+  function extensionForMimeType(mimeType) {
+    if (mimeType.indexOf('mp4') !== -1) { return 'mp4'; }
+    if (mimeType.indexOf('ogg') !== -1) { return 'ogg'; }
+    return 'webm';
+  }
+
+  function formatTimer(ms) {
+    var totalSec = Math.floor(ms / 1000);
+    var m = Math.floor(totalSec / 60);
+    var s = totalSec % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function startRecordTimer() {
+    recordStartTime = Date.now();
+    recordTimerEl.textContent = '0:00';
+    recordTimerInterval = setInterval(function () {
+      recordTimerEl.textContent = formatTimer(Date.now() - recordStartTime);
+    }, 250);
+  }
+
+  function stopRecordTimer() {
+    if (recordTimerInterval) { clearInterval(recordTimerInterval); recordTimerInterval = null; }
+  }
+
+  function startRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      micPermissionNote.classList.add('active');
+      micPermissionNote.textContent = 'This browser does not support microphone recording. Use the "Upload file" tab instead.';
+      return;
+    }
+    micPermissionNote.classList.remove('active');
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(function (stream) {
+        mediaStream = stream;
+        recordedChunks = [];
+        var mimeType = pickSupportedMimeType();
+        try {
+          mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType: mimeType }) : new MediaRecorder(stream);
+        } catch (e) {
+          mediaRecorder = new MediaRecorder(stream);
+        }
+
+        mediaRecorder.addEventListener('dataavailable', function (e) {
+          if (e.data && e.data.size > 0) { recordedChunks.push(e.data); }
+        });
+
+        mediaRecorder.addEventListener('stop', function () {
+          var actualMimeType = mediaRecorder.mimeType || mimeType || 'audio/webm';
+          var blob = new Blob(recordedChunks, { type: actualMimeType });
+          var ext = extensionForMimeType(actualMimeType);
+          recordedBlobFile = new File([blob], 'recording-' + Date.now() + '.' + ext, { type: actualMimeType });
+
+          recordingAudioEl.src = URL.createObjectURL(blob);
+          recordingPreview.classList.add('active');
+
+          // Release the microphone as soon as we're done with it -- keeping
+          // the stream open after stopping would leave the browser's
+          // "microphone in use" indicator on for no reason.
+          mediaStream.getTracks().forEach(function (track) { track.stop(); });
+          mediaStream = null;
+
+          updateSelection();
+        });
+
+        mediaRecorder.start();
+        isRecording = true;
+        recorderEl.classList.add('is-recording');
+        recordBtn.classList.add('recording');
+        recordBtn.setAttribute('aria-pressed', 'true');
+        recordBtn.setAttribute('aria-label', 'Stop recording');
+        recordingPreview.classList.remove('active');
+        startRecordTimer();
+      })
+      .catch(function () {
+        micPermissionNote.classList.add('active');
+        micPermissionNote.textContent = 'Microphone access was denied or is unavailable. Check your browser\'s site permissions, or use the "Upload file" tab instead.';
+      });
+  }
+
+  function stopRecording() {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
+    }
+    isRecording = false;
+    recorderEl.classList.remove('is-recording');
+    recordBtn.classList.remove('recording');
+    recordBtn.setAttribute('aria-pressed', 'false');
+    recordBtn.setAttribute('aria-label', 'Start recording');
+    stopRecordTimer();
+  }
+
+  function discardRecording() {
+    recordedBlobFile = null;
+    recordedChunks = [];
+    recordingAudioEl.removeAttribute('src');
+    recordingPreview.classList.remove('active');
+    recordTimerEl.textContent = '0:00';
+    updateSelection();
+  }
+
+  recordBtn.addEventListener('click', function () {
+    if (isRecording) { stopRecording(); }
+    else { startRecording(); }
+  });
+
+  recordAgainBtn.addEventListener('click', function () {
+    discardRecording();
+  });
+
+  // ---------------- Shared: escape/format helpers ----------------
   function escapeHtml(str) {
     var div = document.createElement('div');
     div.textContent = str;
@@ -1528,8 +1979,13 @@ INDEX_HTML = r"""
     resultsContainer.innerHTML = '';
   }
 
+  // ---------------- Submit: identical for both a picked/dropped file and
+  // a mic recording -- selectedFile is whichever the active tab produced. ----
   transcribeBtn.addEventListener('click', function () {
     if (!selectedFile) { return; }
+    // If a recording is still in progress when the button is somehow
+    // reachable, stop it first so the blob is finalized before upload.
+    if (isRecording) { stopRecording(); }
 
     transcribeBtn.disabled = true;
     statusEl.removeAttribute('data-state');
@@ -1540,7 +1996,7 @@ INDEX_HTML = r"""
     startStepperSimulation();
 
     var formData = new FormData();
-    formData.append('audio', selectedFile);
+    formData.append('audio', selectedFile, selectedFile.name);
 
     fetch('/api/transcribe', { method: 'POST', body: formData })
       .then(function (resp) {
