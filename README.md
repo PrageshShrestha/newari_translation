@@ -34,7 +34,7 @@ A local speech-to-text and autocorrection pipeline for Nepal Bhasa (Newari), com
 - [Screenshots](#screenshots)
 - [Dependencies](#dependencies)
 - [References](#references)
-- [License](#license)
+
 
 ---
 
@@ -216,15 +216,6 @@ System dependency:
 - **SoundFile** — audio file I/O library. https://github.com/bastibe/python-soundfile
 - **SciPy** — used for audio resampling. https://scipy.org/
 
-If a voice activity detection model, a specific ASR checkpoint, or additional corpora are used in your deployment, add them here with their source links once confirmed — avoid listing anything not directly verifiable from the code.
-
----
-
-## License
-
-Add your chosen license here (for example, MIT, Apache 2.0). Third-party components above are subject to their own respective licenses — check each project's repository before redistribution.
-
----
 
 <div align="center">
 
