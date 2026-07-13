@@ -100,25 +100,30 @@ def deletes(word, max_dist):
     return results
 
 from typing import Tuple, List, Dict
-class CorrectionEngine:
-    """Loads dictionary.bin / symspell_index.bin / bigrams.bin and exposes
-    correct_text(), matching the notebook's noisy-channel corrector."""
+from symspellpy import SymSpell, Verbosity
 
+class CorrectionEngine:
     def __init__(self, artifacts_dir="artifacts", confusion_csv=None):
         self.artifacts_dir = artifacts_dir
-        self._load_dictionary(f"{artifacts_dir}/dictionary.bin")
-        self._load_symspell_index(f"{artifacts_dir}/symspell_index.bin")
+        self._load_dictionary(f"{artifacts_dir}/dictionary.bin")  # already loads self.words
         self._load_bigrams(f"{artifacts_dir}/bigrams.bin")
         self.total_unigrams = sum(self.counts)
         self._load_gazetteer_if_present(f"{artifacts_dir}/gazetteer_everestner.txt")
-        # Store vocab as set for fast membership checking
         self.vocab_set = set(self.words)
+        
+        # --- BUILD SYMSPELL INDEX FROM self.words (instead of loading .bin) ---
+        self.sym_spell = SymSpell(max_dictionary_edit_distance=2, prefix_length=7)
+        # Add all words from dictionary.bin
+        for word in self.words:
+            self.sym_spell.create_dictionary_entry(word, 1)
+        
+        # REMOVE self.delete_index entirely (or keep as empty dict for compatibility)
+        self.delete_index = {}
+        
         # Load confusion pairs if provided
         self.word_confusion = {}
         if confusion_csv and os.path.exists(confusion_csv):
             self._load_confusion_pairs(confusion_csv)
-            print(f"[correction_engine] Loaded confusion pairs: {len(self.word_confusion)} entries")
-
     # ---- loaders -----------------------------------------------------
 
     def _load_dictionary(self, path):
@@ -249,14 +254,21 @@ class CorrectionEngine:
         return math.log(p)
 
     def get_candidates(self, typed_word):
+    """Use SymSpell for fast fuzzy lookup."""
         candidates = set()
+        
         if typed_word in self.word_to_id:
             candidates.add(typed_word)
-        for variant in deletes(typed_word, MAX_EDIT_DISTANCE):
-            ids = self.delete_index.get(variant)
-            if ids:
-                for wid in ids:
-                    candidates.add(self.words[wid])
+        
+        # SymSpell lookup (edit distance 2)
+        suggestions = self.sym_spell.lookup(
+            typed_word, 
+            verbosity=Verbosity.ALL, 
+            max_edit_distance=MAX_EDIT_DISTANCE
+        )
+        for suggestion in suggestions:
+            candidates.add(suggestion.term)
+        
         return candidates
 
     def correct(self, typed_word, prev_word=None, top_k=5):
