@@ -254,7 +254,7 @@ class CorrectionEngine:
         return math.log(p)
 
     def get_candidates(self, typed_word):
-    """Use SymSpell for fast fuzzy lookup."""
+        """Use SymSpell for fast fuzzy lookup."""
         candidates = set()
         
         if typed_word in self.word_to_id:
