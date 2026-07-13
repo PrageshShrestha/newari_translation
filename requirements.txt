@@ -1,0 +1,9 @@
+gradio
+nemo_toolkit[asr]
+torch
+soundfile
+scipy
+numpy
+sentencepiece
+jiwer
+pandas
